@@ -18,15 +18,12 @@ RSI_PERIOD = 14
 SMA_SHORT = 15
 SMA_LONG = 40
 CHAIN_MAX = 14
-ROLL_WINDOW = 30
 
 W_SMA = 5
 W_RSI = 1.0
 W_ATR = 5
 W_STREAK = 1.0
 OIL_WEIGHT = 5
-
-OPT_HISTORICAL_ACCURACY = None
 
 END = datetime.now()
 START = END - timedelta(days=3*365)
@@ -58,11 +55,11 @@ print(f"✅ Loaded {len(df)} days of Natural Gas data.")
 def add_indicators(df):
     df = df.copy()
     for col in ["High", "Low", "Close"]:
-        if col not in df.columns:
-            df[col] = df["Close"]
-        elif df[col].isnull().all():
+        series = df.get(col)
+        if series is None or series.empty or series.isnull().all():
             df[col] = df["Close"]
 
+    # ATR berechnen (robust)
     high, low, close = df["High"], df["Low"], df["Close"]
     tr = pd.concat([
         high - low,
@@ -71,7 +68,9 @@ def add_indicators(df):
     ], axis=1).max(axis=1)
     df["ATR"] = tr.rolling(ATR_PERIOD).mean().bfill()
 
+    # RSI
     df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=RSI_PERIOD).rsi()
+
     return df.bfill()
 
 df = add_indicators(df)
