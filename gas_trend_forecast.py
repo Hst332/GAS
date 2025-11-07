@@ -1,5 +1,5 @@
 # ----------------------------------------------------------
-# 🧠 Natural Gas Parameter Optimizer
+# 🧠 Natural Gas Parameter Optimizer (robust)
 # ----------------------------------------------------------
 import yfinance as yf
 import pandas as pd
@@ -10,8 +10,8 @@ import ta
 # ----------------------------------------------------------
 # ⚙️ Settings
 # ----------------------------------------------------------
-SYMBOL = "NG=F"    # Natural Gas
-OIL_SYMBOL = "CL=F"  # WTI Crude Oil
+SYMBOL = "NG=F"       # Natural Gas
+OIL_SYMBOL = "CL=F"   # WTI Crude Oil
 START = datetime.now() - timedelta(days=3*365)
 END = datetime.now()
 
@@ -49,11 +49,25 @@ df = load_data()
 print(f"✅ Loaded {len(df)} days of Natural Gas data.")
 
 # ----------------------------------------------------------
-# 📊 Indicators
+# 📊 Indicators (robust)
 # ----------------------------------------------------------
 def add_indicators(df):
     df = df.copy()
-    df["ATR"] = ta.volatility.AverageTrueRange(df["High"], df["Low"], df["Close"], window=ATR_PERIOD).average_true_range()
+    # Sicherstellen, dass High/Low/Close existieren
+    for col in ["High", "Low", "Close"]:
+        if col not in df.columns or df[col].isnull().all():
+            df[col] = df["Close"]
+
+    # ATR berechnen (robust)
+    high, low, close = df["High"], df["Low"], df["Close"]
+    tr = pd.concat([
+        high - low,
+        (high - close.shift(1)).abs(),
+        (low - close.shift(1)).abs()
+    ], axis=1).max(axis=1)
+    df["ATR"] = tr.rolling(ATR_PERIOD).mean().bfill()
+
+    # RSI
     df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=RSI_PERIOD).rsi()
     return df.bfill()
 
