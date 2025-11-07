@@ -1,5 +1,5 @@
 # ----------------------------------------------------------
-# 🔥 Erdgas Trend Forecast + Parameteroptimierung (stabil)
+# 🔥 Erdgas Trend Forecast + Parameteroptimierung (stabil, nur UNG)
 # ----------------------------------------------------------
 import yfinance as yf
 import pandas as pd
@@ -12,9 +12,8 @@ from itertools import product
 # ----------------------------------------------------------
 # ⚙️ Parameter
 # ----------------------------------------------------------
-SYMBOL_PRIMARY = "NG=F"
-SYMBOL_FALLBACK = "UNG"  # ETF als Backup
-OIL_SYMBOL = "CL=F"
+SYMBOL = "UNG"        # stabiles ETF für Erdgas
+OIL_SYMBOL = "CL=F"   # Rohöl-Futures
 
 ATR_PERIOD = 14
 RSI_PERIOD = 14
@@ -30,24 +29,15 @@ W_STREAK_RANGE  = [1.0, 1.5, 2.0]
 OIL_WEIGHT_RANGE= [2, 5, 8]
 
 END = datetime.now()
-START = END - timedelta(days=20*365)
+START = END - timedelta(days=20*365)  # letzte 20 Jahre
 
 # ----------------------------------------------------------
-# 📥 Daten laden mit Fallback
+# 📥 Daten laden
 # ----------------------------------------------------------
-def load_data(ticker_primary, ticker_fallback, oil_ticker):
-    try:
-        gas = yf.download(ticker_primary, start=START, end=END, auto_adjust=True, progress=False)
-        if gas.empty:
-            raise ValueError("Primary ticker empty")
-        print(f"✅ Loaded {ticker_primary}")
-    except Exception:
-        print(f"⚠️ Primary ticker {ticker_primary} fehlgeschlagen, versuche {ticker_fallback}")
-        gas = yf.download(ticker_fallback, start=START, end=END, auto_adjust=True, progress=False)
-        if gas.empty:
-            raise SystemExit(f"❌ Keine Daten verfügbar für {ticker_primary} oder {ticker_fallback}")
-        print(f"✅ Loaded {ticker_fallback} als Ersatz")
-
+def load_data(ticker, oil_ticker):
+    gas = yf.download(ticker, start=START, end=END, auto_adjust=True, progress=False)
+    if gas.empty:
+        raise SystemExit(f"❌ Keine Daten verfügbar für {ticker}")
     oil = yf.download(oil_ticker, start=START, end=END, auto_adjust=True, progress=False)
     if oil.empty:
         raise SystemExit(f"❌ Keine Daten für Öl ({oil_ticker}) verfügbar")
@@ -63,7 +53,7 @@ def load_data(ticker_primary, ticker_fallback, oil_ticker):
     gas["Oil_Change"] = gas["Oil_Close_prev"].pct_change().fillna(0)
     return gas
 
-df = load_data(SYMBOL_PRIMARY, SYMBOL_FALLBACK, OIL_SYMBOL)
+df = load_data(SYMBOL, OIL_SYMBOL)
 print(f"✅ Loaded {len(df)} days of data ({df['Date'].iloc[0]} → {df['Date'].iloc[-1]})")
 
 # ----------------------------------------------------------
@@ -71,13 +61,6 @@ print(f"✅ Loaded {len(df)} days of data ({df['Date'].iloc[0]} → {df['Date'].
 # ----------------------------------------------------------
 def add_indicators(df):
     df = df.copy()
-    for col in ["High", "Low", "Close"]:
-        series = df.get(col, None)
-        if series is None or (isinstance(series, pd.Series) and (series.empty or series.isnull().all())):
-            df[col] = df["Close"]
-        elif isinstance(series, pd.DataFrame):
-            df[col] = series.iloc[:,0]
-
     # ATR
     high, low, close = df["High"], df["Low"], df["Close"]
     tr = pd.concat([
@@ -87,11 +70,8 @@ def add_indicators(df):
     ], axis=1).max(axis=1)
     df["ATR"] = tr.rolling(ATR_PERIOD).mean().bfill()
 
-    # RSI 1D fix
-    close_series = df["Close"]
-    if isinstance(close_series, pd.DataFrame):
-        close_series = close_series.iloc[:,0]
-    df["RSI"] = ta.momentum.RSIIndicator(close_series, window=RSI_PERIOD).rsi()
+    # RSI
+    df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=RSI_PERIOD).rsi()
     return df.bfill()
 
 df = add_indicators(df)
@@ -145,7 +125,7 @@ best_params = None
 for sma_short, sma_long, w_sma, w_rsi, w_atr, w_streak, w_oil in product(
         SMA_SHORT_RANGE, SMA_LONG_RANGE, W_SMA_RANGE, W_RSI_RANGE, W_ATR_RANGE, W_STREAK_RANGE, OIL_WEIGHT_RANGE):
     if sma_short >= sma_long:
-        continue  # Short muss kleiner als Long
+        continue
     acc = rolling_accuracy(df, w_sma, w_rsi, w_atr, w_streak, w_oil, sma_short, sma_long)
     mean_acc = np.mean(acc)
     if mean_acc > best_mean:
