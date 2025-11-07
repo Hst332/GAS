@@ -1,9 +1,9 @@
 # .github/workflows/schedule.yml
-name: 🔥 Daily Natural Gas Forecast
+name: 📈 Daily Gas Forecast
 
 on:
   schedule:
-    - cron: '30 6 * * 1-5' # 06:30 UTC ≈ 08:30 Wien, Montag–Freitag
+    - cron: '30 6 * * 1-5' # 06:30 UTC ≈ 08:30 Wien, Mo-Fr
   workflow_dispatch:
 
 jobs:
@@ -11,33 +11,32 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 🧩 Repository auschecken
+      - name: 🧩 Checkout repository
         uses: actions/checkout@v4
         with:
-          persist-credentials: false  # wir nutzen unseren eigenen PAT
+          persist-credentials: false  # use our own PAT
 
-      - name: 🐍 Python einrichten
+      - name: 🐍 Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      - name: 📦 Abhängigkeiten installieren
+      - name: 📦 Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install yfinance pandas numpy ta
+          pip install yfinance pandas numpy ta matplotlib
 
-      - name: 🔮 Erdgas-Prognose ausführen
+      - name: 🔮 Run Gas forecast script
         run: python gas_trend_forecast.py
 
-      - name: 💾 Änderungen committen & pushen
+      - name: 💾 Commit and push results
         env:
           GH_PAT: ${{ secrets.GH_PAT }}
         run: |
           git config --global user.name "Hst332"
           git config --global user.email "hst332@example.com"
 
-          git add result.txt
-          git commit -m "🔥 Tägliche Erdgas-Prognose aktualisiert" || echo "Keine Änderungen zum Commit"
+          git add result.txt rolling_accuracy.png
+          git commit -m "📊 Tägliche Erdgas-Prognose aktualisiert" || echo "Keine Änderungen zum Commit"
 
-          # Push mit Personal Access Token
           git push https://x-access-token:${GH_PAT}@github.com/${{ github.repository }} HEAD:main
