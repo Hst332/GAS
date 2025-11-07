@@ -1,5 +1,5 @@
 # ----------------------------------------------------------
-# 🔥 Erdgas Trend Forecast + Parameteroptimierung (stabil, nur UNG)
+# 🔥 Erdgas Trend Forecast + Parameteroptimierung (stabil, 1D fix)
 # ----------------------------------------------------------
 import yfinance as yf
 import pandas as pd
@@ -70,8 +70,11 @@ def add_indicators(df):
     ], axis=1).max(axis=1)
     df["ATR"] = tr.rolling(ATR_PERIOD).mean().bfill()
 
-    # RSI
-    df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=RSI_PERIOD).rsi()
+    # RSI 1D fix
+    close_series = df["Close"]
+    if isinstance(close_series, pd.DataFrame):
+        close_series = close_series.iloc[:,0]  # nur die erste Spalte
+    df["RSI"] = ta.momentum.RSIIndicator(close_series, window=RSI_PERIOD).rsi()
     return df.bfill()
 
 df = add_indicators(df)
