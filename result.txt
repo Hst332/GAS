@@ -1,10 +1,10 @@
-📅 07.11.2025 18:32
-📈 DAX: Ticker
-^GDAXI    23569.96
-Name: 765, dtype: float64 €
-🔮 Trend: Fallend 📉
-📊 Wahrscheinlichkeit steigend: 45.0 %
-📊 Wahrscheinlichkeit fallend : 55.0 %
-📏 Aktueller Trend: DAX ist 2 Tage in Folge gefallen 📉
+📅 07.11.2025 18:53
+🔥 Erdgas (NG=F): Ticker
+UNL    8.185
+Name: 750, dtype: float64 USD/MMBtu
+🔮 Trend: Steigend 📈
+📊 Wahrscheinlichkeit steigend: 64.33 %
+📊 Wahrscheinlichkeit fallend : 35.67 %
+📏 Aktueller Trend: Erdgas ist 1 Tage in Folge gefallen 📉
 🎯 Optimierte Trefferquote (letzte 400 Tage): 69.84 %
 ⚙️ Beste Parameter → SMA=20/50, WSMA=8, RSI=0.8, ATR=4, Streak=1.5
