@@ -1,10 +1,8 @@
-📅 07.11.2025 18:53
-🔥 Erdgas (NG=F): Ticker
-UNL    8.185
-Name: 750, dtype: float64 USD/MMBtu
+📅 07.11.2025 20:34
+📈 Erdgas: Ticker
+Ng=F    4.32
+Name: 754, dtype: float64 $
 🔮 Trend: Steigend 📈
-📊 Wahrscheinlichkeit steigend: 64.33 %
-📊 Wahrscheinlichkeit fallend : 35.67 %
+📊 Wahrscheinlichkeit steigend: 55.42 %
+📊 Wahrscheinlichkeit fallend : 44.58 %
 📏 Aktueller Trend: Erdgas ist 1 Tage in Folge gefallen 📉
-🎯 Optimierte Trefferquote (letzte 400 Tage): 69.84 %
-⚙️ Beste Parameter → SMA=20/50, WSMA=8, RSI=0.8, ATR=4, Streak=1.5
