@@ -10,8 +10,8 @@ import ta
 # ----------------------------------------------------------
 # ⚙️ Parameter
 # ----------------------------------------------------------
-SYMBOL = "^GDAXI"
-ALT_SYMBOL = "EXS1.DE"
+SYMBOL = "NG=F"           # Erdgas-Future (Henry Hub, USD/MMBtu)
+ALT_SYMBOL = "UNL"        # ETF als alternative Quelle
 ATR_PERIOD = 14
 RSI_PERIOD = 14
 SMA_SHORT = 20
@@ -25,7 +25,7 @@ W_SMA = 8
 W_RSI = 0.8
 W_ATR = 4
 W_STREAK = 1.5
-OPT_HISTORICAL_ACCURACY = 69.84  # Optimierte Trefferquote
+OPT_HISTORICAL_ACCURACY = 69.84  # Optimierte Trefferquote (nur Beispiel)
 
 END = datetime.now()
 START = END - timedelta(days=3*365)
@@ -41,7 +41,6 @@ def load_data(ticker):
         if col not in df.columns:
             df[col] = df["Close"]
     df = df.reset_index()
-    # Close als 1D Series erzwingen
     df["Close"] = pd.Series(df["Close"].values.flatten(), dtype=float)
     df["Return"] = df["Close"].pct_change().fillna(0)
     return df
@@ -76,10 +75,10 @@ df = compute_atr(df, ATR_PERIOD)
 # 🔮 Prognoseberechnung
 # ----------------------------------------------------------
 def calculate_prediction(df, w_sma, w_rsi, w_atr, w_streak, sma_short, sma_long):
-    if len(df) < sma_long:  # Minimum prüfen
-        return 50  # neutrale Wahrscheinlichkeit
+    if len(df) < sma_long:
+        return 50
 
-    close = pd.Series(df["Close"].values.flatten(), dtype=float)  # fix für RSI
+    close = pd.Series(df["Close"].values.flatten(), dtype=float)
     df["sma_short"] = close.rolling(sma_short).mean()
     df["sma_long"] = close.rolling(sma_long).mean()
     df["rsi"] = ta.momentum.RSIIndicator(close, window=RSI_PERIOD).rsi()
@@ -91,18 +90,12 @@ def calculate_prediction(df, w_sma, w_rsi, w_atr, w_streak, sma_short, sma_long)
     daily_move = df["Return"].iloc[-1]
 
     prob = 50
-
-    # Trend
     prob += w_sma if last_sma_short > last_sma_long else -w_sma
-
-    # RSI
     prob += (last_rsi - 50) * w_rsi
 
-    # ATR-bewertete Bewegung
     if last_atr > 0:
         prob += np.tanh((daily_move / last_atr) * 2) * w_atr
 
-    # Trendserie
     recent_returns = list(df["Return"].tail(CHAIN_MAX))
     up_streak = down_streak = 0
     for r in reversed(recent_returns):
@@ -167,11 +160,11 @@ rolling_acc = rolling_accuracy(df, W_SMA, W_RSI, W_ATR, W_STREAK, SMA_SHORT, SMA
 # ----------------------------------------------------------
 msg = (
     f"📅 {datetime.now():%d.%m.%Y %H:%M}\n"
-    f"📈 DAX: {round(last_close,2)} €\n"
+    f"🔥 Erdgas (NG=F): {round(last_close, 3)} USD/MMBtu\n"
     f"🔮 Trend: {trend}\n"
     f"📊 Wahrscheinlichkeit steigend: {round(trend_prob,2)} %\n"
     f"📊 Wahrscheinlichkeit fallend : {round(100-trend_prob,2)} %\n"
-    f"📏 Aktueller Trend: DAX ist {streak_length} Tage in Folge {streak_direction}\n"
+    f"📏 Aktueller Trend: Erdgas ist {streak_length} Tage in Folge {streak_direction}\n"
     f"🎯 Optimierte Trefferquote (letzte {LAST_DAYS} Tage): {OPT_HISTORICAL_ACCURACY} %\n"
     f"⚙️ Beste Parameter → SMA={SMA_SHORT}/{SMA_LONG}, WSMA={W_SMA}, RSI={W_RSI}, ATR={W_ATR}, Streak={W_STREAK}"
 )
