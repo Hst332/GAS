@@ -1,5 +1,5 @@
 # ----------------------------------------------------------
-# 📦 Bibliotheken
+# 🧠 Natural Gas Parameter Optimizer
 # ----------------------------------------------------------
 import yfinance as yf
 import pandas as pd
@@ -8,169 +8,141 @@ from datetime import datetime, timedelta
 import ta
 
 # ----------------------------------------------------------
-# ⚙️ Parameter
+# ⚙️ Settings
 # ----------------------------------------------------------
-SYMBOL = "NG=F"           # Erdgas-Future (Henry Hub, USD/MMBtu)
-ALT_SYMBOL = "UNL"        # ETF als alternative Quelle
+SYMBOL = "NG=F"    # Natural Gas
+OIL_SYMBOL = "CL=F"  # WTI Crude Oil
+START = datetime.now() - timedelta(days=3*365)
+END = datetime.now()
+
+# Parameter-Ranges für Optimierung
+SMA_SHORT_RANGE = [10, 15, 20]
+SMA_LONG_RANGE = [30, 40, 50]
+W_SMA_RANGE = [4, 5, 6]
+W_RSI_RANGE = [0.8, 1.0, 1.2]
+W_ATR_RANGE = [4, 5, 6]
+W_STREAK_RANGE = [0.5, 1.0, 1.5]
+OIL_WEIGHT_RANGE = [0, 5, 10]
+
 ATR_PERIOD = 14
 RSI_PERIOD = 14
-SMA_SHORT = 20
-SMA_LONG = 50
-LAST_DAYS = 400
 CHAIN_MAX = 14
-ROLL_WINDOW = 30  # Rollierende Trefferquote
-
-# Beste gefundene Parameter (fest)
-W_SMA = 8
-W_RSI = 0.8
-W_ATR = 4
-W_STREAK = 1.5
-OPT_HISTORICAL_ACCURACY = 69.84  # Optimierte Trefferquote (nur Beispiel)
-
-END = datetime.now()
-START = END - timedelta(days=3*365)
 
 # ----------------------------------------------------------
-# 📥 Daten laden
+# 📥 Load data
 # ----------------------------------------------------------
-def load_data(ticker):
-    df = yf.download(ticker, start=START, end=END, progress=False, auto_adjust=True)
-    if df.empty:
-        raise ValueError(f"Keine Daten für {ticker}")
-    for col in ["Open", "High", "Low", "Close"]:
-        if col not in df.columns:
-            df[col] = df["Close"]
-    df = df.reset_index()
-    df["Close"] = pd.Series(df["Close"].values.flatten(), dtype=float)
-    df["Return"] = df["Close"].pct_change().fillna(0)
-    return df
+def load_data():
+    gas = yf.download(SYMBOL, start=START, end=END, auto_adjust=True, progress=False)
+    oil = yf.download(OIL_SYMBOL, start=START, end=END, auto_adjust=True, progress=False)
 
-df = None
-for ticker in [SYMBOL, ALT_SYMBOL]:
-    try:
-        df = load_data(ticker)
-        print(f"✅ Daten geladen von: {ticker}")
-        break
-    except Exception as e:
-        print(f"⚠️ Fehler beim Laden von {ticker}: {e}")
-if df is None:
-    raise SystemExit("❌ Keine Daten verfügbar.")
+    gas = gas.rename(columns=str.title).reset_index()
+    gas["Return"] = gas["Close"].pct_change().fillna(0)
+    gas["Date"] = pd.to_datetime(gas["Date"])
+
+    oil = oil.rename(columns=str.title).reset_index()
+    oil["Oil_Close_prev"] = oil["Close"].shift(1)
+    gas = gas.merge(oil[["Date", "Oil_Close_prev"]], on="Date", how="left").fillna(method="ffill")
+    gas["Oil_Change"] = gas["Oil_Close_prev"].pct_change().fillna(0)
+    return gas
+
+df = load_data()
+print(f"✅ Loaded {len(df)} days of Natural Gas data.")
 
 # ----------------------------------------------------------
-# 📊 ATR berechnen
+# 📊 Indicators
 # ----------------------------------------------------------
-def compute_atr(df, period=ATR_PERIOD):
-    high, low, close = df["High"], df["Low"], df["Close"]
-    tr = pd.concat([
-        high - low,
-        (high - close.shift(1)).abs(),
-        (low - close.shift(1)).abs()
-    ], axis=1).max(axis=1)
-    df["ATR"] = tr.rolling(period).mean().bfill()
-    return df
+def add_indicators(df):
+    df = df.copy()
+    df["ATR"] = ta.volatility.AverageTrueRange(df["High"], df["Low"], df["Close"], window=ATR_PERIOD).average_true_range()
+    df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=RSI_PERIOD).rsi()
+    return df.bfill()
 
-df = compute_atr(df, ATR_PERIOD)
+df = add_indicators(df)
 
 # ----------------------------------------------------------
-# 🔮 Prognoseberechnung
+# 🔮 Forecast model
 # ----------------------------------------------------------
-def calculate_prediction(df, w_sma, w_rsi, w_atr, w_streak, sma_short, sma_long):
+def calculate_prediction(df, w_sma, w_rsi, w_atr, w_streak, w_oil, sma_short, sma_long):
     if len(df) < sma_long:
         return 50
+    df = df.copy()
+    df["sma_short"] = df["Close"].rolling(sma_short).mean()
+    df["sma_long"] = df["Close"].rolling(sma_long).mean()
 
-    close = pd.Series(df["Close"].values.flatten(), dtype=float)
-    df["sma_short"] = close.rolling(sma_short).mean()
-    df["sma_long"] = close.rolling(sma_long).mean()
-    df["rsi"] = ta.momentum.RSIIndicator(close, window=RSI_PERIOD).rsi()
-
-    last_sma_short = df["sma_short"].iloc[-1]
-    last_sma_long = df["sma_long"].iloc[-1]
-    last_rsi = df["rsi"].iloc[-1] if not np.isnan(df["rsi"].iloc[-1]) else 50
-    last_atr = df["ATR"].iloc[-1]
-    daily_move = df["Return"].iloc[-1]
-
+    last = df.iloc[-1]
     prob = 50
-    prob += w_sma if last_sma_short > last_sma_long else -w_sma
-    prob += (last_rsi - 50) * w_rsi
 
-    if last_atr > 0:
-        prob += np.tanh((daily_move / last_atr) * 2) * w_atr
+    # Trend SMA
+    prob += w_sma if last.sma_short > last.sma_long else -w_sma
 
-    recent_returns = list(df["Return"].tail(CHAIN_MAX))
-    up_streak = down_streak = 0
-    for r in reversed(recent_returns):
-        if r > 0:
-            if down_streak > 0:
-                break
-            up_streak += 1
-        elif r < 0:
-            if up_streak > 0:
-                break
-            down_streak += 1
-    prob += up_streak * w_streak
-    prob -= down_streak * w_streak
+    # RSI
+    prob += (last.RSI - 50) * w_rsi / 10
 
-    prob = max(0, min(100, prob))
-    return prob
+    # ATR-weighted move
+    if last.ATR > 0:
+        daily_move = df["Return"].iloc[-1]
+        prob += np.tanh((daily_move / last.ATR) * 2) * w_atr
 
-# ----------------------------------------------------------
-# 🔹 Aktuelle Trendserie
-# ----------------------------------------------------------
-def get_streak(df):
-    recent_returns = df["Return"].tail(30).values
-    up = recent_returns[-1] > 0
-    streak = 1
+    # Streak
+    recent_returns = df["Return"].tail(CHAIN_MAX).values
+    streak = 0
+    sign = np.sign(recent_returns[-1])
     for r in reversed(recent_returns[:-1]):
-        if (r > 0 and up) or (r < 0 and not up):
+        if np.sign(r) == sign:
             streak += 1
         else:
             break
-    direction = "gestiegen 📈" if up else "gefallen 📉"
-    return direction, streak
+    prob += sign * streak * w_streak
+
+    # Oil effect
+    prob += df["Oil_Change"].iloc[-1] * 100 * w_oil
+
+    return max(0, min(100, prob))
 
 # ----------------------------------------------------------
-# 🔹 Rollierende Trefferquote (optional)
+# 🎯 Backtest
 # ----------------------------------------------------------
-def rolling_accuracy(df, w_sma, w_rsi, w_atr, w_streak, sma_short, sma_long, window=ROLL_WINDOW):
-    acc_list = []
-    for i in range(window, len(df)):
-        correct = 0
-        for j in range(i-window, i):
-            df_slice = df.iloc[:j+1].copy()
-            prob = calculate_prediction(df_slice, w_sma, w_rsi, w_atr, w_streak, sma_short, sma_long)
-            predicted_up = prob >= 50
-            actual_up = df["Return"].iloc[j] > 0
-            if predicted_up == actual_up:
-                correct += 1
-        acc_list.append(correct / window * 100)
-    return acc_list
+def backtest(df, params):
+    acc = 0
+    count = 0
+    for i in range(60, len(df)):
+        sub = df.iloc[:i].copy()
+        p = calculate_prediction(sub, **params)
+        predicted_up = p >= 50
+        actual_up = df["Return"].iloc[i] > 0
+        if predicted_up == actual_up:
+            acc += 1
+        count += 1
+    return acc / count * 100 if count else 0
 
 # ----------------------------------------------------------
-# 🔹 Berechnungen
+# 🧪 Parameter optimization
 # ----------------------------------------------------------
-trend_prob = calculate_prediction(df, W_SMA, W_RSI, W_ATR, W_STREAK, SMA_SHORT, SMA_LONG)
-trend = "Steigend 📈" if trend_prob >= 50 else "Fallend 📉"
-last_close = df["Close"].iloc[-1]
+results = []
 
-streak_direction, streak_length = get_streak(df)
-rolling_acc = rolling_accuracy(df, W_SMA, W_RSI, W_ATR, W_STREAK, SMA_SHORT, SMA_LONG)
+for s_short in SMA_SHORT_RANGE:
+    for s_long in SMA_LONG_RANGE:
+        if s_long <= s_short:
+            continue
+        for w_sma in W_SMA_RANGE:
+            for w_rsi in W_RSI_RANGE:
+                for w_atr in W_ATR_RANGE:
+                    for w_streak in W_STREAK_RANGE:
+                        for w_oil in OIL_WEIGHT_RANGE:
+                            params = dict(
+                                w_sma=w_sma,
+                                w_rsi=w_rsi,
+                                w_atr=w_atr,
+                                w_streak=w_streak,
+                                w_oil=w_oil,
+                                sma_short=s_short,
+                                sma_long=s_long,
+                            )
+                            acc = backtest(df, params)
+                            results.append((acc, params))
+                            print(f"→ {acc:.2f}%  {params}")
 
-# ----------------------------------------------------------
-# 📊 Ergebnis ausgeben & speichern
-# ----------------------------------------------------------
-msg = (
-    f"📅 {datetime.now():%d.%m.%Y %H:%M}\n"
-    f"🔥 Erdgas (NG=F): {round(last_close, 3)} USD/MMBtu\n"
-    f"🔮 Trend: {trend}\n"
-    f"📊 Wahrscheinlichkeit steigend: {round(trend_prob,2)} %\n"
-    f"📊 Wahrscheinlichkeit fallend : {round(100-trend_prob,2)} %\n"
-    f"📏 Aktueller Trend: Erdgas ist {streak_length} Tage in Folge {streak_direction}\n"
-    f"🎯 Optimierte Trefferquote (letzte {LAST_DAYS} Tage): {OPT_HISTORICAL_ACCURACY} %\n"
-    f"⚙️ Beste Parameter → SMA={SMA_SHORT}/{SMA_LONG}, WSMA={W_SMA}, RSI={W_RSI}, ATR={W_ATR}, Streak={W_STREAK}"
-)
-
-print(msg)
-
-with open("result.txt", "w", encoding="utf-8") as f:
-    f.write(msg)
-print("📁 Ergebnis in result.txt gespeichert ✅")
+best = max(results, key=lambda x: x[0])
+print("\n🏁 Beste Kombination:")
+print(best[1])
+print(f"🎯 Trefferquote: {best[0]:.2f} %")
