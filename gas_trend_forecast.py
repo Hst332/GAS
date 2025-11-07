@@ -101,21 +101,24 @@ def calculate_prediction(df, w_sma, w_rsi, w_atr, w_streak, w_oil, sma_short, sm
     df["sma_short"] = df["Close"].rolling(sma_short).mean()
     df["sma_long"] = df["Close"].rolling(sma_long).mean()
 
-    last = df.iloc[-1]
     prob = 50
 
-    # SMA Trend
-    prob += w_sma if last.sma_short > last.sma_long else -w_sma
+    # SMA Trend – letzte Werte als float
+    sma_short_last = df["sma_short"].iloc[-1]
+    sma_long_last  = df["sma_long"].iloc[-1]
+    prob += w_sma if sma_short_last > sma_long_last else -w_sma
 
     # RSI
-    prob += (last.RSI - 50) * w_rsi / 10
+    rsi_last = df["RSI"].iloc[-1]
+    prob += (rsi_last - 50) * w_rsi / 10
 
     # ATR-weighted move
-    if last.ATR > 0:
+    atr_last = df["ATR"].iloc[-1]
+    if atr_last > 0:
         daily_move = df["Return"].iloc[-1]
-        prob += np.tanh((daily_move / last.ATR) * 2) * w_atr
+        prob += np.tanh((daily_move / atr_last) * 2) * w_atr
 
-    # Trendserie
+    # Trendserie / Streak
     recent_returns = df["Return"].tail(CHAIN_MAX).values
     streak = 0
     sign = np.sign(recent_returns[-1])
@@ -127,13 +130,11 @@ def calculate_prediction(df, w_sma, w_rsi, w_atr, w_streak, w_oil, sma_short, sm
     prob += sign * streak * w_streak
 
     # Ölpreis Einfluss
-    prob += df["Oil_Change"].iloc[-1] * 100 * w_oil
+    oil_change_last = df["Oil_Change"].iloc[-1]
+    prob += oil_change_last * 100 * w_oil
 
     return max(0, min(100, prob))
 
-# ----------------------------------------------------------
-# 🔹 Aktueller Trend
-# ----------------------------------------------------------
 trend_prob = calculate_prediction(df, W_SMA, W_RSI, W_ATR, W_STREAK, OIL_WEIGHT, SMA_SHORT, SMA_LONG)
 trend = "Steigend 📈" if trend_prob >= 50 else "Fallend 📉"
 last_close = df["Close"].iloc[-1]
