@@ -1,5 +1,5 @@
 # ----------------------------------------------------------
-# 🔥 Erdgas Trend Forecast + Parameteroptimierung
+# 🔥 Erdgas Trend Forecast + Parameteroptimierung (stabil)
 # ----------------------------------------------------------
 import yfinance as yf
 import pandas as pd
@@ -12,7 +12,8 @@ from itertools import product
 # ----------------------------------------------------------
 # ⚙️ Parameter
 # ----------------------------------------------------------
-SYMBOL = "NG=F"
+SYMBOL_PRIMARY = "NG=F"
+SYMBOL_FALLBACK = "UNG"  # ETF als Backup
 OIL_SYMBOL = "CL=F"
 
 ATR_PERIOD = 14
@@ -20,7 +21,6 @@ RSI_PERIOD = 14
 CHAIN_MAX = 14
 ROLL_WINDOW = 30
 
-# Suchbereich für Optimierung
 SMA_SHORT_RANGE = [10, 15, 20]
 SMA_LONG_RANGE  = [30, 40, 50]
 W_SMA_RANGE     = [3, 5, 8]
@@ -29,16 +29,28 @@ W_ATR_RANGE     = [3, 5, 8]
 W_STREAK_RANGE  = [1.0, 1.5, 2.0]
 OIL_WEIGHT_RANGE= [2, 5, 8]
 
-# Historie: letzte 20 Jahre
 END = datetime.now()
 START = END - timedelta(days=20*365)
 
 # ----------------------------------------------------------
-# 📥 Daten laden
+# 📥 Daten laden mit Fallback
 # ----------------------------------------------------------
-def load_data(ticker, oil_ticker):
-    gas = yf.download(ticker, start=START, end=END, auto_adjust=True, progress=False)
+def load_data(ticker_primary, ticker_fallback, oil_ticker):
+    try:
+        gas = yf.download(ticker_primary, start=START, end=END, auto_adjust=True, progress=False)
+        if gas.empty:
+            raise ValueError("Primary ticker empty")
+        print(f"✅ Loaded {ticker_primary}")
+    except Exception:
+        print(f"⚠️ Primary ticker {ticker_primary} fehlgeschlagen, versuche {ticker_fallback}")
+        gas = yf.download(ticker_fallback, start=START, end=END, auto_adjust=True, progress=False)
+        if gas.empty:
+            raise SystemExit(f"❌ Keine Daten verfügbar für {ticker_primary} oder {ticker_fallback}")
+        print(f"✅ Loaded {ticker_fallback} als Ersatz")
+
     oil = yf.download(oil_ticker, start=START, end=END, auto_adjust=True, progress=False)
+    if oil.empty:
+        raise SystemExit(f"❌ Keine Daten für Öl ({oil_ticker}) verfügbar")
 
     gas = gas.rename(columns=str.title).reset_index()
     gas["Return"] = gas["Close"].pct_change().fillna(0)
@@ -51,7 +63,7 @@ def load_data(ticker, oil_ticker):
     gas["Oil_Change"] = gas["Oil_Close_prev"].pct_change().fillna(0)
     return gas
 
-df = load_data(SYMBOL, OIL_SYMBOL)
+df = load_data(SYMBOL_PRIMARY, SYMBOL_FALLBACK, OIL_SYMBOL)
 print(f"✅ Loaded {len(df)} days of data ({df['Date'].iloc[0]} → {df['Date'].iloc[-1]})")
 
 # ----------------------------------------------------------
