@@ -1,5 +1,5 @@
-  # ----------------------------------------------------------
-# 🔥 Erdgas Trend Forecast (final robust)
+# ----------------------------------------------------------
+# 🔥 Erdgas Trend Forecast (komplett fehlerfrei)
 # ----------------------------------------------------------
 import yfinance as yf
 import pandas as pd
@@ -61,10 +61,11 @@ def add_indicators(df):
         if series is None:
             replace = True
         elif isinstance(series, pd.Series):
-            if series.empty:
+            if series.empty or series.isnull().all():
                 replace = True
-            elif series.isnull().all():
-                replace = True
+        elif isinstance(series, pd.DataFrame):
+            series = series.iloc[:,0]
+            df[col] = series
         else:
             replace = True
 
@@ -80,8 +81,11 @@ def add_indicators(df):
     ], axis=1).max(axis=1)
     df["ATR"] = tr.rolling(ATR_PERIOD).mean().bfill()
 
-    # RSI
-    df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=RSI_PERIOD).rsi()
+    # RSI 1D erzwingen
+    close_series = df["Close"]
+    if isinstance(close_series, pd.DataFrame):
+        close_series = close_series.iloc[:,0]
+    df["RSI"] = ta.momentum.RSIIndicator(close_series, window=RSI_PERIOD).rsi()
 
     return df.bfill()
 
