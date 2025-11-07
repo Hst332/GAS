@@ -1,5 +1,5 @@
-  # ----------------------------------------------------------
-# 🔥 Erdgas Trend Forecast + Rolling Accuracy (fehlerfrei)
+# ----------------------------------------------------------
+# 🔥 Erdgas Trend Forecast + Backtest (letzte 4-5 Jahre)
 # ----------------------------------------------------------
 import yfinance as yf
 import pandas as pd
@@ -20,15 +20,15 @@ SMA_SHORT = 15
 SMA_LONG = 40
 CHAIN_MAX = 14
 ROLL_WINDOW = 30  # Rolling Accuracy Fenster
-
+OIL_WEIGHT = 5
 W_SMA = 5
 W_RSI = 1.0
 W_ATR = 5
 W_STREAK = 1.0
-OIL_WEIGHT = 5
 
+# Historie: 20 Jahre
 END = datetime.now()
-START = END - timedelta(days=3*365)
+START = END - timedelta(days=20*365)
 
 # ----------------------------------------------------------
 # 📥 Daten laden
@@ -49,7 +49,7 @@ def load_data(ticker, oil_ticker):
     return gas
 
 df = load_data(SYMBOL, OIL_SYMBOL)
-print(f"✅ Loaded {len(df)} days of Natural Gas data.")
+print(f"✅ Loaded {len(df)} days of data ({df['Date'].iloc[0]} → {df['Date'].iloc[-1]})")
 
 # ----------------------------------------------------------
 # 📊 Indikatoren
@@ -72,7 +72,7 @@ def add_indicators(df):
     ], axis=1).max(axis=1)
     df["ATR"] = tr.rolling(ATR_PERIOD).mean().bfill()
 
-    # RSI 1D fix
+    # RSI 1D
     close_series = df["Close"]
     if isinstance(close_series, pd.DataFrame):
         close_series = close_series.iloc[:,0]
@@ -93,57 +93,23 @@ def calculate_prediction(df, w_sma, w_rsi, w_atr, w_streak, w_oil, sma_short, sm
     df["sma_long"] = df["Close"].rolling(sma_long).mean()
 
     prob = 50
-
     # SMA Trend
-    sma_short_last = df["sma_short"].iloc[-1]
-    sma_long_last  = df["sma_long"].iloc[-1]
-    prob += w_sma if sma_short_last > sma_long_last else -w_sma
-
+    prob += w_sma if df["sma_short"].iloc[-1] > df["sma_long"].iloc[-1] else -w_sma
     # RSI
-    rsi_last = df["RSI"].iloc[-1]
-    prob += (rsi_last - 50) * w_rsi / 10
-
-    # ATR-weighted move
+    prob += (df["RSI"].iloc[-1]-50) * w_rsi/10
+    # ATR move
     atr_last = df["ATR"].iloc[-1]
-    if atr_last > 0:
+    if atr_last>0:
         daily_move = df["Return"].iloc[-1]
-        prob += np.tanh((daily_move / atr_last) * 2) * w_atr
-
-    # Trendserie / Streak
+        prob += np.tanh((daily_move/atr_last)*2)*w_atr
+    # Streak
     recent_returns = df["Return"].tail(CHAIN_MAX).values
     sign = np.sign(recent_returns[-1])
     streak = sum(1 for r in reversed(recent_returns[:-1]) if np.sign(r)==sign)
-    prob += sign * streak * w_streak
-
+    prob += sign*streak*w_streak
     # Ölpreis Einfluss
-    oil_change_last = df["Oil_Change"].iloc[-1]
-    prob += oil_change_last * 100 * w_oil
-
+    prob += df["Oil_Change"].iloc[-1]*100*w_oil
     return max(0, min(100, prob))
-
-# ----------------------------------------------------------
-# 🔹 Aktueller Trend
-# ----------------------------------------------------------
-trend_prob = calculate_prediction(df, W_SMA, W_RSI, W_ATR, W_STREAK, OIL_WEIGHT, SMA_SHORT, SMA_LONG)
-trend = "Steigend 📈" if trend_prob >= 50 else "Fallend 📉"
-last_close = df["Close"].iloc[-1]
-
-# ----------------------------------------------------------
-# 🔹 Trendserie
-# ----------------------------------------------------------
-def get_streak(df):
-    recent_returns = df["Return"].tail(30).values
-    up = recent_returns[-1] > 0
-    streak = 1
-    for r in reversed(recent_returns[:-1]):
-        if (r > 0 and up) or (r < 0 and not up):
-            streak += 1
-        else:
-            break
-    direction = "gestiegen 📈" if up else "gefallen 📉"
-    return direction, streak
-
-streak_direction, streak_length = get_streak(df)
 
 # ----------------------------------------------------------
 # 📊 Rolling Accuracy
@@ -151,7 +117,6 @@ streak_direction, streak_length = get_streak(df)
 def rolling_accuracy(df, w_sma, w_rsi, w_atr, w_streak, w_oil, sma_short, sma_long, window=ROLL_WINDOW):
     acc_list = []
     dates = []
-
     for i in range(window, len(df)):
         correct = 0
         for j in range(i-window, i):
@@ -161,33 +126,31 @@ def rolling_accuracy(df, w_sma, w_rsi, w_atr, w_streak, w_oil, sma_short, sma_lo
             actual_up = df["Return"].iloc[j] > 0
             if predicted_up == actual_up:
                 correct += 1
-        acc_list.append(correct / window * 100)
+        acc_list.append(correct/window*100)
         dates.append(df["Date"].iloc[i])
-
     return pd.DataFrame({"Date": dates, "Accuracy": acc_list})
 
 rolling_acc_df = rolling_accuracy(df, W_SMA, W_RSI, W_ATR, W_STREAK, OIL_WEIGHT, SMA_SHORT, SMA_LONG)
-print("✅ Rolling Accuracy berechnet.")
+print("✅ Rolling Accuracy berechnet")
 
 # ----------------------------------------------------------
-# 📊 Ergebnis ausgeben & speichern
+# 📊 Statistik in Zahlen
 # ----------------------------------------------------------
-msg = (
-    f"📅 {datetime.now():%d.%m.%Y %H:%M}\n"
-    f"📈 Erdgas: {round(last_close,2)} $\n"
-    f"🔮 Trend: {trend}\n"
-    f"📊 Wahrscheinlichkeit steigend: {round(trend_prob,2)} %\n"
-    f"📊 Wahrscheinlichkeit fallend : {round(100-trend_prob,2)} %\n"
-    f"📏 Aktueller Trend: Erdgas ist {streak_length} Tage in Folge {streak_direction}\n"
-)
-print(msg)
+mean_acc   = rolling_acc_df["Accuracy"].mean()
+median_acc = rolling_acc_df["Accuracy"].median()
+min_acc    = rolling_acc_df["Accuracy"].min()
+max_acc    = rolling_acc_df["Accuracy"].max()
+std_acc    = rolling_acc_df["Accuracy"].std()
 
-with open("result.txt", "w", encoding="utf-8") as f:
-    f.write(msg)
-print("📁 Ergebnis in result.txt gespeichert ✅")
+print("📊 Rolling Accuracy Statistik (letzte 4-5 Jahre):")
+print(f"Durchschnitt: {mean_acc:.2f} %")
+print(f"Median      : {median_acc:.2f} %")
+print(f"Minimum     : {min_acc:.2f} %")
+print(f"Maximum     : {max_acc:.2f} %")
+print(f"Std-Abw.    : {std_acc:.2f} %")
 
 # ----------------------------------------------------------
-# 📈 Rolling Accuracy Plot
+# 📈 Plot
 # ----------------------------------------------------------
 plt.figure(figsize=(12,6))
 plt.plot(rolling_acc_df["Date"], rolling_acc_df["Accuracy"], label="Rollierende Trefferquote", color="blue")
