@@ -1,4 +1,4 @@
-# ----------------------------------------------------------
+  # ----------------------------------------------------------
 # 🔥 Erdgas Trend Forecast (final robust)
 # ----------------------------------------------------------
 import yfinance as yf
@@ -55,18 +55,23 @@ print(f"✅ Loaded {len(df)} days of Natural Gas data.")
 def add_indicators(df):
     df = df.copy()
     for col in ["High", "Low", "Close"]:
-        series = df.get(col)
+        series = df.get(col, None)
         replace = False
+
         if series is None:
             replace = True
-        else:
-            # nur boolescher Wert, keine direkte Series-Abfrage
-            if series.size == 0 or series.isnull().all():
+        elif isinstance(series, pd.Series):
+            if series.empty:
                 replace = True
+            elif series.isnull().all():
+                replace = True
+        else:
+            replace = True
+
         if replace:
             df[col] = df["Close"]
 
-    # ATR berechnen (robust)
+    # ATR berechnen
     high, low, close = df["High"], df["Low"], df["Close"]
     tr = pd.concat([
         high - low,
