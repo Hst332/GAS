@@ -1,5 +1,5 @@
 # ----------------------------------------------------------
-# 🧠 Natural Gas Parameter Optimizer (robust)
+# 🔥 Erdgas Trend Forecast (robust)
 # ----------------------------------------------------------
 import yfinance as yf
 import pandas as pd
@@ -8,32 +8,35 @@ from datetime import datetime, timedelta
 import ta
 
 # ----------------------------------------------------------
-# ⚙️ Settings
+# ⚙️ Parameter
 # ----------------------------------------------------------
-SYMBOL = "NG=F"       # Natural Gas
-OIL_SYMBOL = "CL=F"   # WTI Crude Oil
-START = datetime.now() - timedelta(days=3*365)
-END = datetime.now()
-
-# Parameter-Ranges für Optimierung
-SMA_SHORT_RANGE = [10, 15, 20]
-SMA_LONG_RANGE = [30, 40, 50]
-W_SMA_RANGE = [4, 5, 6]
-W_RSI_RANGE = [0.8, 1.0, 1.2]
-W_ATR_RANGE = [4, 5, 6]
-W_STREAK_RANGE = [0.5, 1.0, 1.5]
-OIL_WEIGHT_RANGE = [0, 5, 10]
+SYMBOL = "NG=F"
+OIL_SYMBOL = "CL=F"
 
 ATR_PERIOD = 14
 RSI_PERIOD = 14
+SMA_SHORT = 15
+SMA_LONG = 40
 CHAIN_MAX = 14
+ROLL_WINDOW = 30
+
+W_SMA = 5
+W_RSI = 1.0
+W_ATR = 5
+W_STREAK = 1.0
+OIL_WEIGHT = 5
+
+OPT_HISTORICAL_ACCURACY = None
+
+END = datetime.now()
+START = END - timedelta(days=3*365)
 
 # ----------------------------------------------------------
-# 📥 Load data
+# 📥 Daten laden
 # ----------------------------------------------------------
-def load_data():
-    gas = yf.download(SYMBOL, start=START, end=END, auto_adjust=True, progress=False)
-    oil = yf.download(OIL_SYMBOL, start=START, end=END, auto_adjust=True, progress=False)
+def load_data(ticker, oil_ticker):
+    gas = yf.download(ticker, start=START, end=END, auto_adjust=True, progress=False)
+    oil = yf.download(oil_ticker, start=START, end=END, auto_adjust=True, progress=False)
 
     gas = gas.rename(columns=str.title).reset_index()
     gas["Return"] = gas["Close"].pct_change().fillna(0)
@@ -41,24 +44,25 @@ def load_data():
 
     oil = oil.rename(columns=str.title).reset_index()
     oil["Oil_Close_prev"] = oil["Close"].shift(1)
-    gas = gas.merge(oil[["Date", "Oil_Close_prev"]], on="Date", how="left").fillna(method="ffill")
+
+    gas = gas.merge(oil[["Date", "Oil_Close_prev"]], on="Date", how="left").ffill()
     gas["Oil_Change"] = gas["Oil_Close_prev"].pct_change().fillna(0)
     return gas
 
-df = load_data()
+df = load_data(SYMBOL, OIL_SYMBOL)
 print(f"✅ Loaded {len(df)} days of Natural Gas data.")
 
 # ----------------------------------------------------------
-# 📊 Indicators (robust)
+# 📊 Indikatoren
 # ----------------------------------------------------------
 def add_indicators(df):
     df = df.copy()
-    # Sicherstellen, dass High/Low/Close existieren
     for col in ["High", "Low", "Close"]:
-        if col not in df.columns or df[col].isnull().all():
+        if col not in df.columns:
+            df[col] = df["Close"]
+        elif df[col].isnull().all():
             df[col] = df["Close"]
 
-    # ATR berechnen (robust)
     high, low, close = df["High"], df["Low"], df["Close"]
     tr = pd.concat([
         high - low,
@@ -67,14 +71,13 @@ def add_indicators(df):
     ], axis=1).max(axis=1)
     df["ATR"] = tr.rolling(ATR_PERIOD).mean().bfill()
 
-    # RSI
     df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=RSI_PERIOD).rsi()
     return df.bfill()
 
 df = add_indicators(df)
 
 # ----------------------------------------------------------
-# 🔮 Forecast model
+# 🔮 Prognoseberechnung
 # ----------------------------------------------------------
 def calculate_prediction(df, w_sma, w_rsi, w_atr, w_streak, w_oil, sma_short, sma_long):
     if len(df) < sma_long:
@@ -86,7 +89,7 @@ def calculate_prediction(df, w_sma, w_rsi, w_atr, w_streak, w_oil, sma_short, sm
     last = df.iloc[-1]
     prob = 50
 
-    # Trend SMA
+    # SMA Trend
     prob += w_sma if last.sma_short > last.sma_long else -w_sma
 
     # RSI
@@ -97,7 +100,7 @@ def calculate_prediction(df, w_sma, w_rsi, w_atr, w_streak, w_oil, sma_short, sm
         daily_move = df["Return"].iloc[-1]
         prob += np.tanh((daily_move / last.ATR) * 2) * w_atr
 
-    # Streak
+    # Trendserie
     recent_returns = df["Return"].tail(CHAIN_MAX).values
     streak = 0
     sign = np.sign(recent_returns[-1])
@@ -108,55 +111,49 @@ def calculate_prediction(df, w_sma, w_rsi, w_atr, w_streak, w_oil, sma_short, sm
             break
     prob += sign * streak * w_streak
 
-    # Oil effect
+    # Ölpreis Einfluss
     prob += df["Oil_Change"].iloc[-1] * 100 * w_oil
 
     return max(0, min(100, prob))
 
 # ----------------------------------------------------------
-# 🎯 Backtest
+# 🔹 Aktueller Trend
 # ----------------------------------------------------------
-def backtest(df, params):
-    acc = 0
-    count = 0
-    for i in range(60, len(df)):
-        sub = df.iloc[:i].copy()
-        p = calculate_prediction(sub, **params)
-        predicted_up = p >= 50
-        actual_up = df["Return"].iloc[i] > 0
-        if predicted_up == actual_up:
-            acc += 1
-        count += 1
-    return acc / count * 100 if count else 0
+trend_prob = calculate_prediction(df, W_SMA, W_RSI, W_ATR, W_STREAK, OIL_WEIGHT, SMA_SHORT, SMA_LONG)
+trend = "Steigend 📈" if trend_prob >= 50 else "Fallend 📉"
+last_close = df["Close"].iloc[-1]
 
 # ----------------------------------------------------------
-# 🧪 Parameter optimization
+# 🔹 Trendserie
 # ----------------------------------------------------------
-results = []
+def get_streak(df):
+    recent_returns = df["Return"].tail(30).values
+    up = recent_returns[-1] > 0
+    streak = 1
+    for r in reversed(recent_returns[:-1]):
+        if (r > 0 and up) or (r < 0 and not up):
+            streak += 1
+        else:
+            break
+    direction = "gestiegen 📈" if up else "gefallen 📉"
+    return direction, streak
 
-for s_short in SMA_SHORT_RANGE:
-    for s_long in SMA_LONG_RANGE:
-        if s_long <= s_short:
-            continue
-        for w_sma in W_SMA_RANGE:
-            for w_rsi in W_RSI_RANGE:
-                for w_atr in W_ATR_RANGE:
-                    for w_streak in W_STREAK_RANGE:
-                        for w_oil in OIL_WEIGHT_RANGE:
-                            params = dict(
-                                w_sma=w_sma,
-                                w_rsi=w_rsi,
-                                w_atr=w_atr,
-                                w_streak=w_streak,
-                                w_oil=w_oil,
-                                sma_short=s_short,
-                                sma_long=s_long,
-                            )
-                            acc = backtest(df, params)
-                            results.append((acc, params))
-                            print(f"→ {acc:.2f}%  {params}")
+streak_direction, streak_length = get_streak(df)
 
-best = max(results, key=lambda x: x[0])
-print("\n🏁 Beste Kombination:")
-print(best[1])
-print(f"🎯 Trefferquote: {best[0]:.2f} %")
+# ----------------------------------------------------------
+# 📊 Ergebnis ausgeben & speichern
+# ----------------------------------------------------------
+msg = (
+    f"📅 {datetime.now():%d.%m.%Y %H:%M}\n"
+    f"📈 Erdgas: {round(last_close,2)} $\n"
+    f"🔮 Trend: {trend}\n"
+    f"📊 Wahrscheinlichkeit steigend: {round(trend_prob,2)} %\n"
+    f"📊 Wahrscheinlichkeit fallend : {round(100-trend_prob,2)} %\n"
+    f"📏 Aktueller Trend: Erdgas ist {streak_length} Tage in Folge {streak_direction}\n"
+)
+
+print(msg)
+
+with open("result.txt", "w", encoding="utf-8") as f:
+    f.write(msg)
+print("📁 Ergebnis in result.txt gespeichert ✅")
