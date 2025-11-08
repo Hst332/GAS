@@ -1,5 +1,5 @@
 # ----------------------------------------------------------
-# 🔥 Erdgas Trend Forecast + Optimierte Parameterberechnung
+# 🔥 Erdgas Trend Forecast + Optimierte Parameterberechnung (TradingEconomics API)
 # ----------------------------------------------------------
 import requests
 import pandas as pd
@@ -12,13 +12,17 @@ from itertools import product
 # ----------------------------------------------------------
 # ⚙️ Parameter
 # ----------------------------------------------------------
-API_KEY = "DEIN_USERNAME:DEIN_KEY"  # hier TradingEconomics API Key einsetzen
+API_KEY = "USERNAME:KEY"  # <--- hier deinen TradingEconomics User:Key eintragen
+
+SYMBOL = "NG"   # Natural Gas
+OIL_SYMBOL = "CL"  # Crude Oil
+
 ATR_PERIOD = 14
 RSI_PERIOD = 14
 CHAIN_MAX = 14
 ROLL_WINDOW = 30
 
-# Suchbereich für Optimierung (reduziert für Geschwindigkeit)
+# Suchbereich für Optimierung
 SMA_SHORT_RANGE = [10, 15, 20]
 SMA_LONG_RANGE  = [30, 40, 50]
 W_SMA_RANGE     = [5, 8]
@@ -35,9 +39,8 @@ START = END - timedelta(days=10*365)
 # 📥 Daten laden von TradingEconomics
 # ----------------------------------------------------------
 def load_data_te():
-    print("⏳ Lade Daten von TradingEconomics ...")
-    url_gas = f"https://api.tradingeconomics.com/commodity/natural%20gas/historical?c={API_KEY}"
-    url_oil = f"https://api.tradingeconomics.com/commodity/crude%20oil/historical?c={API_KEY}"
+    url_gas = f"https://api.tradingeconomics.com/historical/commodity/{SYMBOL}?c={API_KEY}"
+    url_oil = f"https://api.tradingeconomics.com/historical/commodity/{OIL_SYMBOL}?c={API_KEY}"
 
     r_gas = requests.get(url_gas)
     r_oil = requests.get(url_oil)
@@ -45,44 +48,49 @@ def load_data_te():
     if r_gas.status_code != 200 or r_oil.status_code != 200:
         raise ValueError(f"Fehler beim Abrufen: Gas {r_gas.status_code}, Oil {r_oil.status_code}")
 
-    gas_json = r_gas.json()
-    oil_json = r_oil.json()
+    gas = pd.DataFrame(r_gas.json())
+    oil = pd.DataFrame(r_oil.json())
 
-    gas = pd.DataFrame(gas_json)[["Date", "Close"]].rename(columns={"Close":"Gas_Close"})
-    gas["Date"] = pd.to_datetime(gas["Date"])
-    gas = gas.sort_values("Date").reset_index(drop=True)
-    gas["Return"] = gas["Gas_Close"].pct_change().fillna(0)
+    # Datum sortieren
+    gas['Date'] = pd.to_datetime(gas['Date'])
+    oil['Date'] = pd.to_datetime(oil['Date'])
+    gas = gas.sort_values('Date').reset_index(drop=True)
+    oil = oil.sort_values('Date').reset_index(drop=True)
 
-    oil = pd.DataFrame(oil_json)[["Date", "Close"]].rename(columns={"Close":"Oil_Close"})
-    oil["Date"] = pd.to_datetime(oil["Date"])
-    oil = oil.sort_values("Date").reset_index(drop=True)
-    oil["Oil_Close_prev"] = oil["Oil_Close"].shift(1)
-    oil["Oil_Change"] = oil["Oil_Close_prev"].pct_change().fillna(0)
+    # Returns
+    gas['Return'] = gas['Close'].pct_change().fillna(0)
+    oil['Oil_Close_prev'] = oil['Close'].shift(1)
+    gas = gas.merge(oil[['Date', 'Oil_Close_prev']], on='Date', how='left').ffill()
+    gas['Oil_Change'] = gas['Oil_Close_prev'].pct_change().fillna(0)
 
-    df = pd.merge(gas, oil[["Date","Oil_Close_prev","Oil_Change"]], on="Date", how="left").ffill()
-    print(f"✅ Loaded {len(df)} days of data ({df['Date'].iloc[0]} → {df['Date'].iloc[-1]})")
-    return df
+    return gas
 
+print("⏳ Lade Daten von TradingEconomics ...")
 df = load_data_te()
+print(f"✅ Loaded {len(df)} Tage ({df['Date'].iloc[0]} → {df['Date'].iloc[-1]})")
 
 # ----------------------------------------------------------
-# 📊 Indikatoren
+# 📊 Indikatoren berechnen
 # ----------------------------------------------------------
 def add_indicators(df):
     df = df.copy()
+    for col in ['High', 'Low', 'Close']:
+        series = df.get(col, None)
+        if series is None or (isinstance(series, pd.Series) and (series.empty or series.isnull().all())):
+            df[col] = df['Close']
+        elif isinstance(series, pd.DataFrame):
+            df[col] = series.iloc[:,0]
+
     # ATR
-    high = df["Gas_Close"]
-    low = df["Gas_Close"]
-    close = df["Gas_Close"]
-    tr = pd.concat([
-        high - low,
-        (high - close.shift(1)).abs(),
-        (low - close.shift(1)).abs()
-    ], axis=1).max(axis=1)
-    df["ATR"] = tr.rolling(ATR_PERIOD).mean().bfill()
+    high, low, close = df['High'], df['Low'], df['Close']
+    tr = pd.concat([high-low, (high-close.shift(1)).abs(), (low-close.shift(1)).abs()], axis=1).max(axis=1)
+    df['ATR'] = tr.rolling(ATR_PERIOD).mean().bfill()
 
     # RSI
-    df["RSI"] = ta.momentum.RSIIndicator(df["Gas_Close"], window=RSI_PERIOD).rsi()
+    close_series = df['Close']
+    if isinstance(close_series, pd.DataFrame):
+        close_series = close_series.iloc[:,0]
+    df['RSI'] = ta.momentum.RSIIndicator(close_series, window=RSI_PERIOD).rsi()
     return df.bfill()
 
 df = add_indicators(df)
@@ -94,20 +102,21 @@ def calculate_prediction(df, w_sma, w_rsi, w_atr, w_streak, w_oil, sma_short, sm
     if len(df) < sma_long:
         return 50
     df = df.copy()
-    df["sma_short"] = df["Gas_Close"].rolling(sma_short).mean()
-    df["sma_long"] = df["Gas_Close"].rolling(sma_long).mean()
+    df['sma_short'] = df['Close'].rolling(sma_short).mean()
+    df['sma_long'] = df['Close'].rolling(sma_long).mean()
 
     prob = 50
-    prob += w_sma if df["sma_short"].iloc[-1] > df["sma_long"].iloc[-1] else -w_sma
-    prob += (df["RSI"].iloc[-1]-50) * w_rsi / 10
-    atr_last = df["ATR"].iloc[-1]
+    prob += w_sma if df['sma_short'].iloc[-1] > df['sma_long'].iloc[-1] else -w_sma
+    prob += (df['RSI'].iloc[-1]-50)*w_rsi/10
+    atr_last = df['ATR'].iloc[-1]
     if atr_last>0:
-        prob += np.tanh((df["Return"].iloc[-1]/atr_last)*2)*w_atr
-    recent_returns = df["Return"].tail(CHAIN_MAX).values
+        prob += np.tanh((df['Return'].iloc[-1]/atr_last)*2)*w_atr
+
+    recent_returns = df['Return'].tail(CHAIN_MAX).values
     sign = np.sign(recent_returns[-1])
     streak = sum(1 for r in reversed(recent_returns[:-1]) if np.sign(r)==sign)
     prob += sign*streak*w_streak
-    prob += df["Oil_Change"].iloc[-1]*100*w_oil
+    prob += df['Oil_Change'].iloc[-1]*100*w_oil
     return max(0, min(100, prob))
 
 # ----------------------------------------------------------
@@ -121,14 +130,14 @@ def rolling_accuracy(df, w_sma, w_rsi, w_atr, w_streak, w_oil, sma_short, sma_lo
             df_slice = df.iloc[:j+1].copy()
             prob = calculate_prediction(df_slice, w_sma, w_rsi, w_atr, w_streak, w_oil, sma_short, sma_long)
             predicted_up = prob >= 50
-            actual_up = df["Return"].iloc[j] > 0
+            actual_up = df['Return'].iloc[j] > 0
             if predicted_up == actual_up:
                 correct += 1
         acc_list.append(correct/window*100)
     return acc_list
 
 # ----------------------------------------------------------
-# 🔍 Parameteroptimierung
+# 🔍 Parameteroptimierung (schnell)
 # ----------------------------------------------------------
 best_mean = -1
 best_params = None
@@ -137,13 +146,14 @@ for sma_short, sma_long, w_sma, w_rsi, w_atr, w_streak, w_oil in product(
         SMA_SHORT_RANGE, SMA_LONG_RANGE, W_SMA_RANGE, W_RSI_RANGE, W_ATR_RANGE, W_STREAK_RANGE, OIL_WEIGHT_RANGE):
     if sma_short >= sma_long:
         continue
-    acc = rolling_accuracy(df, w_sma, w_rsi, w_atr, w_streak, w_oil, sma_short, sma_long, step=5)  # schneller Schritt
+    acc = rolling_accuracy(df, w_sma, w_rsi, w_atr, w_streak, w_oil, sma_short, sma_long, step=5)
     mean_acc = np.mean(acc)
     if mean_acc > best_mean:
         best_mean = mean_acc
         best_params = (sma_short, sma_long, w_sma, w_rsi, w_atr, w_streak, w_oil)
 
-print(f"✅ Beste Parameter: SMA={best_params[0]}/{best_params[1]}, W_SMA={best_params[2]}, W_RSI={best_params[3]}, W_ATR={best_params[4]}, Streak={best_params[5]}, Oil_Weight={best_params[6]}")
+print("✅ Optimierung abgeschlossen")
+print(f"Beste Parameter: SMA={best_params[0]}/{best_params[1]}, W_SMA={best_params[2]}, W_RSI={best_params[3]}, W_ATR={best_params[4]}, Streak={best_params[5]}, Oil_Weight={best_params[6]}")
 print(f"Durchschnittliche Rolling Accuracy: {best_mean:.2f} %")
 
 # ----------------------------------------------------------
@@ -159,9 +169,9 @@ print(f"Std-Abw.: {np.std(best_acc):.2f} %")
 # 📈 Plot
 # ----------------------------------------------------------
 plt.figure(figsize=(12,6))
-plt.plot(df["Date"].tail(len(best_acc)), best_acc, label="Rollierende Trefferquote", color="blue")
+plt.plot(df['Date'].tail(len(best_acc)), best_acc, label="Rollierende Trefferquote", color="blue")
 plt.axhline(50, color="red", linestyle="--", label="Zufall (50%)")
-plt.title("Rolling Accuracy der Erdgas-Vorhersage (TradingEconomics, Optimiert)")
+plt.title("Rolling Accuracy der Erdgas-Vorhersage (TradingEconomics)")
 plt.xlabel("Datum")
 plt.ylabel("Trefferquote (%)")
 plt.legend()
