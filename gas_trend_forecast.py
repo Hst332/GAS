@@ -29,9 +29,9 @@ W_ATR_RANGE     = [3, 5, 8]
 W_STREAK_RANGE  = [1.0, 1.5, 2.0]
 OIL_WEIGHT_RANGE= [2, 5, 8]
 
-# Historie: letzte 20 Jahre
+# Historie: letzte 10 Jahre
 END = datetime.now()
-START = END - timedelta(days=20*365)
+START = END - timedelta(days=10*365)
 
 # ----------------------------------------------------------
 # 📥 Daten laden
@@ -168,3 +168,4 @@ plt.tight_layout()
 plt.savefig("rolling_accuracy_optimized.png")
 plt.show()
 print("📁 Plot gespeichert als rolling_accuracy_optimized.png ✅")
+
