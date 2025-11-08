@@ -12,10 +12,10 @@ from itertools import product
 # ----------------------------------------------------------
 # ⚙️ Parameter
 # ----------------------------------------------------------
-TRADINGECONOMICS_KEY = "DEIN_KEY_HIER"  # API-Key einfügen
+TRADINGECONOMICS_KEY = "DEIN_KEY_HIER"  # <--- API-Key hier einfügen
 
-SYMBOL_GAS = "Natural Gas"
-SYMBOL_OIL = "Crude Oil"
+SYMBOL_GAS = "natgas"     # TradingEconomics Symbol für Natural Gas
+SYMBOL_OIL = "oil"        # TradingEconomics Symbol für Crude Oil
 
 ATR_PERIOD = 14
 RSI_PERIOD = 14
