@@ -1,42 +1,28 @@
-# .github/workflows/schedule.yml
-name: 📈 Daily Gas Forecast
+name: Daily Gas Forecast
 
 on:
   schedule:
-    - cron: '30 6 * * 1-5' # 06:30 UTC ≈ 08:30 Wien, Mo-Fr
-  workflow_dispatch:
+    - cron: '0 8 * * *'  # läuft täglich um 08:00 UTC
+  workflow_dispatch:      # erlaubt manuelles Starten
 
 jobs:
-  forecast:
+  run-forecast:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 🧩 Checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          persist-credentials: false  # use our own PAT
 
-      - name: 🐍 Set up Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: 3.11
 
-      - name: 📦 Install dependencies
+      - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install yfinance pandas numpy ta matplotlib
+          pip install requests pandas numpy ta matplotlib
 
-      - name: 🔮 Run Gas forecast script
-        run: python gas_trend_forecast.py
-
-      - name: 💾 Commit and push results
+      - name: Run forecast script
         env:
-          GH_PAT: ${{ secrets.GH_PAT }}
-        run: |
-          git config --global user.name "Hst332"
-          git config --global user.email "hst332@example.com"
-
-          git add result.txt rolling_accuracy.png
-          git commit -m "📊 Tägliche Erdgas-Prognose aktualisiert" || echo "Keine Änderungen zum Commit"
-
-          git push https://x-access-token:${GH_PAT}@github.com/${{ github.repository }} HEAD:main
+          TRADINGECONOMICS_KEY: ${{ secrets.TRADINGECONOMICS_KEY }}
+        run: python gas_forecast_daily.py
