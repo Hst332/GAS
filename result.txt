@@ -1,8 +1,3 @@
-📅 07.11.2025 20:54
-📈 Erdgas: Ticker
-Ng=F    4.32
-Name: 754, dtype: float64 $
-🔮 Trend: Steigend 📈
-📊 Wahrscheinlichkeit steigend: 50.32 %
-📊 Wahrscheinlichkeit fallend : 49.68 %
-📏 Aktueller Trend: Erdgas ist 1 Tage in Folge gefallen 📉
+📅 09.11.2025 10:05
+⚠️ Heute ist kein Handelstag (Wochenende). Keine aktuellen Daten verfügbar.
+📁 Letzter bekannter Trend bleibt bestehen.
