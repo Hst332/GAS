@@ -1,6 +1,7 @@
-📅 10.11.2025 08:42
+📅 10.11.2025 08:47
 🔥 Erdgaspreis: 15.32 USD/MMBtu
 🔮 Trend: Steigend 📈
 📊 Wahrscheinlichkeit steigend: 50 %
 📊 Wahrscheinlichkeit fallend : 50 %
 ⚙️ Modellparameter → SMA=15/40, W_SMA=8, RSI=1.0, ATR=5, Streak=1.5
+🕒 Datenquelle: Finanzen.net (Letztes Update: 10.11.2025 08:47)
