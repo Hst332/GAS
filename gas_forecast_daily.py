@@ -113,13 +113,19 @@ def calculate_prediction(df):
     return max(0, min(100, prob))
 
 # ----------------------------------------------------------
-# 📊 Hauptablauf
+# 📊 Hauptablauf (mit Datenherkunft)
 # ----------------------------------------------------------
 try:
     df = load_data_te_or_finanzen()
+
+    # Herkunft bestimmen
+    source = "TradingEconomics" if len(df) > 1 else "Finanzen.net"
+    last_update = df["Date"].iloc[-1].strftime("%d.%m.%Y %H:%M")
+
     trend_prob = calculate_prediction(df)
     trend = "Steigend 📈" if trend_prob >= 50 else "Fallend 📉"
     last_close = df["Close"].iloc[-1]
+
     msg = (
         f"📅 {datetime.now():%d.%m.%Y %H:%M}\n"
         f"🔥 Erdgaspreis: {round(last_close,3)} USD/MMBtu\n"
@@ -127,7 +133,9 @@ try:
         f"📊 Wahrscheinlichkeit steigend: {round(trend_prob,2)} %\n"
         f"📊 Wahrscheinlichkeit fallend : {round(100-trend_prob,2)} %\n"
         f"⚙️ Modellparameter → SMA={SMA_SHORT}/{SMA_LONG}, W_SMA={W_SMA}, RSI={W_RSI}, ATR={W_ATR}, Streak={W_STREAK}\n"
+        f"🕒 Datenquelle: {source} (Letztes Update: {last_update})"
     )
+
     print(msg)
 
     # Ergebnis speichern
@@ -139,3 +147,4 @@ except Exception as e:
     print(f"❌ Fehler: {e}")
     with open("result.txt", "w", encoding="utf-8") as f:
         f.write(f"❌ Fehler: {e}")
+
