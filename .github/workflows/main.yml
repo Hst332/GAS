@@ -1,44 +1,38 @@
-name: 📊 Daily Gas Forecast
+name: Daily Gas Forecast
 
 on:
   schedule:
-    - cron: '0 7 * * 1-5'   # Läuft Montag–Freitag um 07:00 UTC = 08:00 CET
-  workflow_dispatch:         # Erlaubt manuelles Starten über GitHub UI
-
-permissions:
-  contents: write            # Erforderlich, damit der Bot result.txt committen darf
+    - cron: '0 8 * * *'  # täglich 08:00 UTC
+  workflow_dispatch:
 
 jobs:
   run-forecast:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 📥 Checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: 🐍 Set up Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: 3.11
 
-      - name: 📦 Install dependencies
+      - name: Install dependencies
         run: |
           pip install requests pandas numpy ta matplotlib
 
-      - name: 🔮 Run Gas Forecast Script
+      - name: Run forecast script
         env:
           TRADINGECONOMICS_KEY: ${{ secrets.TRADINGECONOMICS_KEY }}
         run: python gas_forecast_daily.py
 
-      - name: 🧾 Commit & Push result.txt
-        if: success()
+      - name: Commit result
         run: |
+          echo "📦 Committe result.txt..."
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add result.txt
+          git commit -m "📊 Tägliche Gas-Prognose aktualisiert" || echo "Keine Änderungen"
+          git push
 
-          # Sicherstellen, dass Änderungen erkannt werden
-          git add result.txt || echo "⚠️ Keine result.txt gefunden"
-          git diff --cached --quiet && echo "⚠️ Keine Änderungen zu committen" || (
-            git commit -m "📊 Tägliche Gas-Prognose aktualisiert"
-            git push origin main
-          )
