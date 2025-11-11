@@ -13,10 +13,11 @@ import os
 # ⚙️ Einstellungen
 # ----------------------------------------------------------
 HIST_FILE = "gas_history.csv"
+PREVIOUS_FILE = "previous_result.txt"
 SYMBOL_GAS = "Natural Gas"
 TRADINGECONOMICS_KEY = "DEIN_KEY_HIER"
 
-# Modellparameter (optimiertes Modell)
+# Modellparameter
 SMA_SHORT = 15
 SMA_LONG = 40
 W_SMA = 8
@@ -51,7 +52,7 @@ try:
         if not ((df["Date"] == today).any()):
             new_row = pd.DataFrame([{"Date": today, "Close": today_price, "High": today_price, "Low": today_price}])
             df = pd.concat([df, new_row], ignore_index=True)
-        print(f"✅ Aktueller Preis von Finanzen.net: {today_price} USD")
+        print(f"✅ Aktueller Preis: {today_price} USD")
     else:
         raise ValueError("❌ Kurs konnte nicht gefunden werden.")
 except Exception as e:
@@ -64,20 +65,16 @@ df["High"] = df.get("High", df["Close"])
 df["Low"] = df.get("Low", df["Close"])
 df["Return"] = df["Close"].pct_change().fillna(0)
 
-# ATR
 high, low, close = df["High"], df["Low"], df["Close"]
 tr = pd.concat([high - low, (high - close.shift(1)).abs(), (low - close.shift(1)).abs()], axis=1).max(axis=1)
 df["ATR"] = tr.rolling(ATR_PERIOD).mean().bfill()
 
-# RSI
 df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=RSI_PERIOD).rsi().bfill()
-
-# SMA
 df["sma_short"] = df["Close"].rolling(SMA_SHORT).mean()
 df["sma_long"] = df["Close"].rolling(SMA_LONG).mean()
 
 # ----------------------------------------------------------
-# 🔹 Wahrscheinlichkeit berechnen
+# 🔹 Prognose berechnen
 # ----------------------------------------------------------
 def calculate_prediction(df):
     prob = 50
@@ -95,7 +92,7 @@ trend = "Steigend 📈" if trend_prob >= 50 else "Fallend 📉"
 last_close = df["Close"].iloc[-1]
 
 # ----------------------------------------------------------
-# 🔹 Ergebnis ausgeben & speichern
+# 🔹 Ausgabe speichern
 # ----------------------------------------------------------
 msg = (
     f"📅 {datetime.now():%d.%m.%Y %H:%M}\n"
@@ -103,7 +100,6 @@ msg = (
     f"🔮 Trend: {trend}\n"
     f"📊 Wahrscheinlichkeit steigend: {round(trend_prob,2)} %\n"
     f"📊 Wahrscheinlichkeit fallend : {round(100-trend_prob,2)} %\n"
-    f"⚙️ Modellparameter → SMA={SMA_SHORT}/{SMA_LONG}, W_SMA={W_SMA}, RSI={W_RSI}, ATR={W_ATR}, Streak={W_STREAK}"
 )
 
 with open("result.txt", "w", encoding="utf-8") as f:
@@ -111,38 +107,33 @@ with open("result.txt", "w", encoding="utf-8") as f:
 print("✅ Ergebnis in result.txt gespeichert.")
 
 # ----------------------------------------------------------
-# 🔹 Historie speichern für morgen
+# 🔹 Änderungserkennung (>10 % oder Trendwechsel)
 # ----------------------------------------------------------
-df.to_csv(HIST_FILE, index=False)
-print(f"💾 Historische Daten in {HIST_FILE} gespeichert.")
-
-# ----------------------------------------------------------
-# 🔹 Änderungserkennung (>10 %) + GitHub-Notification
-# ----------------------------------------------------------
-PREVIOUS_FILE = "previous_result.txt"
-
-def get_previous_value(path):
+def get_previous_info(path):
     if not os.path.exists(path):
-        return None
+        return None, None
     with open(path, "r", encoding="utf-8") as f:
         text = f.read()
-        m = re.search(r'Wahrscheinlichkeit steigend:\s*([0-9.]+)', text)
-        if m:
-            return float(m.group(1))
-        return None
+        m_prob = re.search(r'Wahrscheinlichkeit steigend:\s*([0-9.]+)', text)
+        m_trend = re.search(r'Trend:\s*(Steigend|Fallend)', text)
+        prob = float(m_prob.group(1)) if m_prob else None
+        tr = m_trend.group(1) if m_trend else None
+        return prob, tr
+    return None, None
 
-previous_value = get_previous_value(PREVIOUS_FILE)
-current_value = trend_prob
+prev_prob, prev_trend = get_previous_info(PREVIOUS_FILE)
+change_triggered = False
 
-if previous_value is not None:
-    change = abs(current_value - previous_value) / previous_value * 100 if previous_value != 0 else 0
-    print(f"🔸 Änderung gegenüber letzter Prognose: {change:.2f}%")
-    if change > 10:
-        print("::warning::⚠️ Änderung >10 % erkannt!")
+if prev_prob is not None:
+    diff = abs(trend_prob - prev_prob) / prev_prob * 100 if prev_prob != 0 else 0
+    print(f"🔸 Änderung: {diff:.2f}% (Trend vorher: {prev_trend} → jetzt: {trend})")
+
+    if diff > 10 or prev_trend != ("Steigend" if trend_prob >= 50 else "Fallend"):
+        print("::warning::⚠️ Signifikante Änderung oder Trendwechsel erkannt!")
+        change_triggered = True
 else:
     print("ℹ️ Kein Vergleichswert vorhanden (erster Lauf).")
 
-# Aktuellen Wert speichern
 with open(PREVIOUS_FILE, "w", encoding="utf-8") as f:
     f.write(msg)
 print("💾 previous_result.txt aktualisiert.")
