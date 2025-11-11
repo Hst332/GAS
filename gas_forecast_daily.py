@@ -7,6 +7,7 @@ import numpy as np
 from datetime import datetime
 import ta
 import re
+import os
 
 # ----------------------------------------------------------
 # ⚙️ Einstellungen
@@ -105,7 +106,6 @@ msg = (
     f"⚙️ Modellparameter → SMA={SMA_SHORT}/{SMA_LONG}, W_SMA={W_SMA}, RSI={W_RSI}, ATR={W_ATR}, Streak={W_STREAK}"
 )
 
-print(msg)
 with open("result.txt", "w", encoding="utf-8") as f:
     f.write(msg)
 print("✅ Ergebnis in result.txt gespeichert.")
@@ -115,3 +115,34 @@ print("✅ Ergebnis in result.txt gespeichert.")
 # ----------------------------------------------------------
 df.to_csv(HIST_FILE, index=False)
 print(f"💾 Historische Daten in {HIST_FILE} gespeichert.")
+
+# ----------------------------------------------------------
+# 🔹 Änderungserkennung (>10 %) + GitHub-Notification
+# ----------------------------------------------------------
+PREVIOUS_FILE = "previous_result.txt"
+
+def get_previous_value(path):
+    if not os.path.exists(path):
+        return None
+    with open(path, "r", encoding="utf-8") as f:
+        text = f.read()
+        m = re.search(r'Wahrscheinlichkeit steigend:\s*([0-9.]+)', text)
+        if m:
+            return float(m.group(1))
+        return None
+
+previous_value = get_previous_value(PREVIOUS_FILE)
+current_value = trend_prob
+
+if previous_value is not None:
+    change = abs(current_value - previous_value) / previous_value * 100 if previous_value != 0 else 0
+    print(f"🔸 Änderung gegenüber letzter Prognose: {change:.2f}%")
+    if change > 10:
+        print("::warning::⚠️ Änderung >10 % erkannt!")
+else:
+    print("ℹ️ Kein Vergleichswert vorhanden (erster Lauf).")
+
+# Aktuellen Wert speichern
+with open(PREVIOUS_FILE, "w", encoding="utf-8") as f:
+    f.write(msg)
+print("💾 previous_result.txt aktualisiert.")
