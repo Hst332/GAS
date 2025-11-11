@@ -1,6 +1,7 @@
 # ----------------------------------------------------------
-# 🔥 Daily Natural Gas Forecast mit TradingEconomics + Fallback
+# 🔥 Daily Natural Gas Forecast mit TradingEconomics + Fallback zu Finanzen.net
 # ----------------------------------------------------------
+import os
 import requests
 import pandas as pd
 import numpy as np
@@ -12,11 +13,13 @@ import re
 # ----------------------------------------------------------
 # ⚙️ Einstellungen
 # ----------------------------------------------------------
-TRADINGECONOMICS_KEY = "DEIN_KEY_HIER"  # <--- Hier deinen API-Key einfügen!
-SYMBOL_GAS = "NG"   # ✅ offizielles Kürzel für Natural Gas Futures
-SYMBOL_OIL = "CL"   # ✅ Crude Oil WTI Futures
+TRADINGECONOMICS_KEY = os.getenv("TRADINGECONOMICS_KEY")  # wird aus GitHub Secrets geladen
+SYMBOL_GAS = "Natural Gas"
+SYMBOL_OIL = "Crude Oil"
 
-# Modellparameter (deine optimierten Werte)
+# ----------------------------------------------------------
+# 🔧 Modellparameter (dein optimiertes Modell)
+# ----------------------------------------------------------
 SMA_SHORT = 15
 SMA_LONG = 40
 W_SMA = 8
@@ -29,69 +32,66 @@ RSI_PERIOD = 14
 CHAIN_MAX = 14
 
 # ----------------------------------------------------------
-# 📥 Datenabruf mit Wiederholungen und Fallback
+# 📥 Daten abrufen mit Retry + Fallback (TradingEconomics → Finanzen.net)
 # ----------------------------------------------------------
-def load_data():
+def load_data_te_or_finanzen():
     for attempt in range(3):
         print(f"⏳ Lade Daten von TradingEconomics (Versuch {attempt+1}) ...")
         try:
-            # Verwende neue, stabile API-Endpunkte
-            url_gas = f"https://api.tradingeconomics.com/commodity/historical/{SYMBOL_GAS}?c={TRADINGECONOMICS_KEY}"
-            url_oil = f"https://api.tradingeconomics.com/commodity/historical/{SYMBOL_OIL}?c={TRADINGECONOMICS_KEY}"
+            url_gas = f"https://api.tradingeconomics.com/historical/commodity/{SYMBOL_GAS}?c={TRADINGECONOMICS_KEY}"
             r_gas = requests.get(url_gas, timeout=10)
-            r_oil = requests.get(url_oil, timeout=10)
 
-            if r_gas.status_code == 200 and r_oil.status_code == 200:
+            if r_gas.status_code == 200:
                 gas = pd.DataFrame(r_gas.json())
-                oil = pd.DataFrame(r_oil.json())
-
-                gas["Date"] = pd.to_datetime(gas["date"])
-                gas["Close"] = pd.to_numeric(gas["value"], errors="coerce")
+                gas["Date"] = pd.to_datetime(gas["Date"])
+                gas["Close"] = pd.to_numeric(gas["Close"], errors="coerce")
                 gas = gas.dropna(subset=["Close"])
-                gas = gas.sort_values("Date")
-
-                print(f"✅ {len(gas)} Gasdatenpunkte geladen.")
+                print(f"✅ {len(gas)} Datenpunkte geladen (TradingEconomics).")
                 return gas
+
             else:
-                print(f"⚠️ Fehler beim Abrufen: Gas {r_gas.status_code}, Oil {r_oil.status_code}")
+                print(f"⚠️ Fehler beim Abrufen: Gas {r_gas.status_code}")
+
         except Exception as e:
-            print(f"⚠️ Fehler: {e}")
+            print(f"⚠️ Netzwerkfehler: {e}")
+
         if attempt < 2:
             print("⏳ Warte 5 Sekunden und versuche erneut...")
             time.sleep(5)
 
-    # Fallback zu Finanzen.net
+    # -------- Fallback: Finanzen.net --------
     print("⚠️ TE-Daten nicht verfügbar – hole aktuellen Kurs von Finanzen.net ...")
-    try:
-        url = "https://www.finanzen.net/rohstoffe/erdgas-preis-natural-gas"
-        html = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).text
-        match = re.search(r'([0-9]+,[0-9]+)\s*USD', html)
-        if match:
-            price = float(match.group(1).replace(',', '.'))
-            df = pd.DataFrame([{
-                "Date": datetime.now(),
-                "Close": price,
-                "High": price,
-                "Low": price
-            }])
-            print(f"✅ Aktueller Gaspreis von Finanzen.net: {price} USD")
-            return df
-    except Exception as e:
-        print(f"❌ Fehler beim Fallback: {e}")
-    raise ValueError("❌ Keine Daten verfügbar (TE und Finanzen.net fehlgeschlagen).")
+    url = "https://www.finanzen.net/rohstoffe/erdgas-preis-natural-gas"
+    html = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).text
+    match = re.search(r'([0-9]+,[0-9]+)\s*USD', html)
+
+    if match:
+        price = float(match.group(1).replace(',', '.'))
+        df = pd.DataFrame([{
+            "Date": datetime.now(),
+            "Close": price,
+            "High": price,
+            "Low": price
+        }])
+        print(f"✅ Aktueller Gaspreis von Finanzen.net: {price} USD")
+        return df
+
+    raise ValueError("❌ Weder TE noch Finanzen.net liefern Daten.")
 
 # ----------------------------------------------------------
-# 📈 Berechnungen
+# 📈 Indikatoren & Berechnung
 # ----------------------------------------------------------
 def add_indicators(df):
     df = df.copy()
     if "High" not in df.columns:
         df["High"] = df["Close"]
         df["Low"] = df["Close"]
+
+    high, low, close = df["High"], df["Low"], df["Close"]
     tr = pd.concat([
-        df["High"] - df["Low"],
-        (df["High"] - df["Close"].shift(1)).abs(),
-        (df["Low"] - df["Close"].shift(1)).abs()
+        high - low,
+        (high - close.shift(1)).abs(),
+        (low - close.shift(1)).abs()
     ], axis=1).max(axis=1)
     df["ATR"] = tr.rolling(ATR_PERIOD).mean().bfill()
     df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=RSI_PERIOD).rsi()
@@ -102,6 +102,7 @@ def calculate_prediction(df):
     df = add_indicators(df)
     if len(df) < SMA_LONG:
         return 50
+
     df["sma_short"] = df["Close"].rolling(SMA_SHORT).mean()
     df["sma_long"] = df["Close"].rolling(SMA_LONG).mean()
 
@@ -117,10 +118,11 @@ def calculate_prediction(df):
     return max(0, min(100, prob))
 
 # ----------------------------------------------------------
-# 🧠 Hauptlogik
+# 📊 Hauptablauf mit Quelle + Speichern in result.txt
 # ----------------------------------------------------------
 try:
-    df = load_data()
+    df = load_data_te_or_finanzen()
+
     source = "TradingEconomics" if len(df) > 1 else "Finanzen.net"
     last_update = df["Date"].iloc[-1].strftime("%d.%m.%Y %H:%M")
 
@@ -144,7 +146,6 @@ try:
     print("✅ Ergebnis in result.txt gespeichert.")
 
 except Exception as e:
-    err = f"❌ Fehler: {e}"
-    print(err)
+    print(f"❌ Fehler: {e}")
     with open("result.txt", "w", encoding="utf-8") as f:
-        f.write(err)
+        f.write(f"❌ Fehler: {e}")
