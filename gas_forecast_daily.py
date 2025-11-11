@@ -6,7 +6,7 @@ import re
 import os
 
 # === Dein API-Key ===
-TRADINGECONOMICS_KEY = "DEIN_KEY_HIER"  # <-- hier deinen echten Key eintragen
+TRADINGECONOMICS_KEY = "Dde738eb6093c469:ohx1cnrb3tkuuei"  # <-- hier deinen echten Key eintragen
 TARGET_FILE = "gas_forecast_daily.py"
 
 # === Kandidaten für Commodities ===
@@ -59,3 +59,4 @@ if __name__ == "__main__":
         print("✅ Beide Slugs erfolgreich aktualisiert.")
     else:
         print("⚠️ Nicht alle Slugs konnten ermittelt werden.")
+
