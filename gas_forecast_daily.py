@@ -1,32 +1,25 @@
 # ----------------------------------------------------------
-# 🔹 Daily Natural Gas Forecast mit Speicherung der Historie
+# 🌐 GAS FORECAST DAILY (Henry Hub Spotpreis)
+# Multi-Source Version: TradingEconomics → EIA → Yahoo → finanzen.net
 # ----------------------------------------------------------
+
+import os
+import re
 import requests
 import pandas as pd
 import numpy as np
 from datetime import datetime
+from bs4 import BeautifulSoup
 import ta
-import re
-import os
-import sys
-import subprocess
-
-# ----------------------------------------------------------
-# ✅ BeautifulSoup sicher importieren
-# ----------------------------------------------------------
-try:
-    from bs4 import BeautifulSoup
-except ImportError:
-    print("⚠️ bs4 nicht gefunden. Installiere...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "beautifulsoup4"])
-    from bs4 import BeautifulSoup
-print("✅ BeautifulSoup bereit.")
 
 # ----------------------------------------------------------
 # ⚙️ Einstellungen
 # ----------------------------------------------------------
 HIST_FILE = "gas_history.csv"
 PREVIOUS_FILE = "previous_result.txt"
+TRADINGECONOMICS_KEY = os.getenv("TRADINGECONOMICS_KEY", "DEIN_KEY_HIER")
+EIA_API_KEY = os.getenv("EIA_API_KEY", "DEIN_EIA_KEY_HIER")
+
 SMA_SHORT = 15
 SMA_LONG = 40
 W_SMA = 8
@@ -36,10 +29,9 @@ W_STREAK = 1.5
 ATR_PERIOD = 14
 RSI_PERIOD = 14
 CHAIN_MAX = 14
-API_KEY = os.getenv("TRADINGECONOMICS_KEY", "DEIN_KEY_HIER")
 
 # ----------------------------------------------------------
-# 🔹 Historische Daten laden
+# 🔹 Historische Daten laden oder neu anlegen
 # ----------------------------------------------------------
 try:
     df = pd.read_csv(HIST_FILE, parse_dates=["Date"])
@@ -49,88 +41,117 @@ except FileNotFoundError:
     df = pd.DataFrame(columns=["Date", "Close", "High", "Low"])
 
 # ----------------------------------------------------------
-# 🔹 Aktuellen Spotpreis holen (TradingEconomics → Fallback finanzen.net)
+# 🔹 Multi-Source Preisabruf
 # ----------------------------------------------------------
-today_price = None
-try:
-    # 1️⃣ Versuch: TradingEconomics API
-    url = f"https://api.tradingeconomics.com/markets/commodities?c={API_KEY}"
-    data = requests.get(url, timeout=10).json()
-
-    for item in data:
-        if item.get("symbol") == "NATGAS" or "Natural Gas" in item.get("name", ""):
-            today_price = float(item.get("last", 0))
-            break
-
-    if today_price and 1 < today_price < 50:
-        print(f"✅ Spotpreis (TradingEconomics): {today_price} USD/MMBtu")
-    else:
-        raise ValueError("Kein gültiger Wert von TradingEconomics erhalten")
-
-except Exception as e:
-    print(f"⚠️ TradingEconomics-API nicht verfügbar ({e}) – wechsle zu finanzen.net ...")
+def get_tradingeconomics_price():
+    """TradingEconomics API (Henry Hub Spotpreis)"""
     try:
-        # 2️⃣ Fallback: finanzen.net Parsing
-        url = "https://www.finanzen.net/rohstoffe/erdgas-preis-natural-gas"
-        html = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).text
-        soup = BeautifulSoup(html, "html.parser")
+        url = f"https://api.tradingeconomics.com/markets/commodities?c={TRADINGECONOMICS_KEY}"
+        data = requests.get(url, timeout=10).json()
+        for item in data:
+            if "Natural Gas" in item.get("name", "") or item.get("symbol") == "NATGAS":
+                price = float(item.get("last", 0))
+                if price > 0:
+                    print(f"✅ Preis von TradingEconomics: {price} USD/MMBtu")
+                    return price
+    except Exception as e:
+        print(f"⚠️ TradingEconomics nicht verfügbar: {e}")
+    return None
 
+
+def get_eia_price():
+    """EIA API (Henry Hub Spotpreis USD/MMBtu, daily)"""
+    try:
+        url = f"https://api.eia.gov/v2/natural-gas/pri/whd/data/?api_key={EIA_API_KEY}&frequency=daily&data[0]=value&facets[series][]=NG.RNGWHHD.D&sort[0][column]=period&sort[0][direction]=desc&offset=0&length=1"
+        data = requests.get(url, timeout=10).json()
+        price = float(data["response"]["data"][0]["value"])
+        if price > 0:
+            print(f"✅ Preis von EIA: {price} USD/MMBtu")
+            return price
+    except Exception as e:
+        print(f"⚠️ EIA API nicht verfügbar: {e}")
+    return None
+
+
+def get_yahoo_price():
+    """Yahoo Finance (Natural Gas Futures NG=F, Fallback)"""
+    try:
+        import yfinance as yf
+        gas = yf.Ticker("NG=F")
+        price = gas.info.get("regularMarketPrice")
+        if price and price > 0:
+            print(f"✅ Preis von Yahoo Finance (Future): {price} USD/MMBtu")
+            return price
+    except Exception as e:
+        print(f"⚠️ Yahoo Finance nicht verfügbar: {e}")
+    return None
+
+
+def get_finanzen_price():
+    """Letzter Fallback: finanzen.net Scraping"""
+    try:
+        url = "https://www.finanzen.net/rohstoffe/erdgas-preis-natural-gas"
+        html = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10).text
+        soup = BeautifulSoup(html, "html.parser")
         candidates = []
+
         for tag in soup.find_all(text=re.compile(r"([0-9]+,[0-9]+)\s*USD")):
-            if "MMBtu" in tag or "Erdgas" in tag or "Natural Gas" in tag:
+            if any(x in tag for x in ["Erdgas", "Natural Gas", "MMBtu"]):
                 val = re.search(r"([0-9]+,[0-9]+)", tag)
                 if val:
                     price = float(val.group(1).replace(",", "."))
                     if 1 < price < 50:
                         candidates.append(price)
 
-        if not candidates:
-            for el in soup.find_all(["span", "div"], class_=re.compile(r"price", re.I)):
-                m = re.search(r"([0-9]+,[0-9]+)", el.text)
-                if m:
-                    price = float(m.group(1).replace(",", "."))
-                    if 1 < price < 50:
-                        candidates.append(price)
-
         if candidates:
-            today_price = min(candidates)
-            print(f"✅ Spotpreis (Fallback finanzen.net): {today_price} USD/MMBtu")
+            price = min(candidates)
+            print(f"✅ Preis von finanzen.net: {price} USD/MMBtu")
+            return price
         else:
-            raise ValueError("❌ Kein Spotpreis auf finanzen.net gefunden!")
+            raise ValueError("Kein Preis gefunden.")
+    except Exception as e:
+        print(f"⚠️ finanzen.net nicht verfügbar: {e}")
+    return None
 
-    except Exception as e2:
-        print(f"⚠️ Fehler beim Abrufen des Preises: {e2}")
-        if not df.empty:
-            today_price = df["Close"].iloc[-1]
-            print(f"ℹ️ Verwende letzten bekannten Preis: {today_price} USD/MMBtu")
-        else:
-            raise SystemExit("❌ Kein Preis verfügbar und keine Historie vorhanden — Abbruch.")
+
+sources = [
+    get_tradingeconomics_price,
+    get_eia_price,
+    get_yahoo_price,
+    get_finanzen_price,
+]
+
+today_price = None
+for src in sources:
+    today_price = src()
+    if today_price:
+        break
+
+if not today_price:
+    raise SystemExit("❌ Kein gültiger Preis gefunden (alle Quellen fehlgeschlagen).")
 
 # ----------------------------------------------------------
-# 🔹 Neue Zeile speichern
+# 🔹 Preis speichern / Historie erweitern
 # ----------------------------------------------------------
 today = pd.Timestamp(datetime.now().date())
 if not ((df["Date"] == today).any()):
-    new_row = pd.DataFrame([{"Date": today, "Close": today_price, "High": today_price, "Low": today_price}])
-    df = pd.concat([df, new_row], ignore_index=True)
+    df.loc[len(df)] = [today, today_price, today_price, today_price]
+    print(f"💾 Neuer Datensatz: {today_price} USD/MMBtu ({today.date()})")
+df.to_csv(HIST_FILE, index=False)
 
 # ----------------------------------------------------------
 # 🔹 Indikatoren berechnen
 # ----------------------------------------------------------
-df["High"] = df.get("High", df["Close"])
-df["Low"] = df.get("Low", df["Close"])
 df["Return"] = df["Close"].pct_change().fillna(0)
-
 high, low, close = df["High"], df["Low"], df["Close"]
 tr = pd.concat([high - low, (high - close.shift(1)).abs(), (low - close.shift(1)).abs()], axis=1).max(axis=1)
 df["ATR"] = tr.rolling(ATR_PERIOD).mean().bfill()
-
 df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=RSI_PERIOD).rsi().bfill()
 df["sma_short"] = df["Close"].rolling(SMA_SHORT).mean()
 df["sma_long"] = df["Close"].rolling(SMA_LONG).mean()
 
 # ----------------------------------------------------------
-# 🔹 Prognose berechnen
+# 🔹 Prognosefunktion
 # ----------------------------------------------------------
 def calculate_prediction(df):
     prob = 50
@@ -160,10 +181,11 @@ msg = (
 
 with open("result.txt", "w", encoding="utf-8") as f:
     f.write(msg)
-print("✅ Ergebnis in result.txt gespeichert.")
+print("✅ Ergebnis in result.txt gespeichert.\n")
+print(msg)
 
 # ----------------------------------------------------------
-# 🔹 Änderungserkennung (>10 % oder Trendwechsel)
+# 🔹 Trendänderungserkennung
 # ----------------------------------------------------------
 def get_previous_info(path):
     if not os.path.exists(path):
@@ -175,18 +197,12 @@ def get_previous_info(path):
         prob = float(m_prob.group(1)) if m_prob else None
         tr = m_trend.group(1) if m_trend else None
         return prob, tr
-    return None, None
 
 prev_prob, prev_trend = get_previous_info(PREVIOUS_FILE)
-change_triggered = False
-
 if prev_prob is not None:
     diff = abs(trend_prob - prev_prob) / prev_prob * 100 if prev_prob != 0 else 0
-    print(f"🔸 Änderung: {diff:.2f}% (Trend vorher: {prev_trend} → jetzt: {trend})")
-
     if diff > 10 or prev_trend != ("Steigend" if trend_prob >= 50 else "Fallend"):
         print("⚠️ Signifikante Änderung oder Trendwechsel erkannt!")
-        change_triggered = True
 else:
     print("ℹ️ Kein Vergleichswert vorhanden (erster Lauf).")
 
