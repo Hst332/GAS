@@ -2,13 +2,13 @@ name: Hourly Gas Forecast (Mon–Fri 07–22)
 
 on:
   schedule:
-    # Läuft stündlich von 07:00 bis 22:00 Uhr (Montag–Freitag)
     - cron: '0 7-22 * * 1-5'
   workflow_dispatch:
 
 jobs:
   run-forecast:
     runs-on: ubuntu-latest
+    retention-days: 1   # <-- richtig platziert: auf Job-Ebene (1–400)
 
     steps:
       - name: Checkout repository
@@ -38,9 +38,3 @@ jobs:
           git add result.txt previous_result.txt || true
           git commit -m "📊 Stündliche Gas-Prognose aktualisiert" || echo "Keine Änderungen"
           git push
-          
-      - name: jobs:
-        run-forecast: |
-          runs-on: ubuntu-latest
-          retention-days: 1   # 🔹 Nur 1 Tage aufbewahren
-
