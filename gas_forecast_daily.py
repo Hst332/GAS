@@ -11,35 +11,52 @@ import re
 import subprocess
 
 # ----------------------------------------------------------
-# 🔹 bs4 (BeautifulSoup) installieren, falls nicht vorhanden
+# 🔹 Aktuellen Spotpreis von finanzen.net holen (präzise)
 # ----------------------------------------------------------
+today_price = None
 try:
-    from bs4 import BeautifulSoup
-except ImportError:
-    print("⚠️ bs4 nicht gefunden. Installiere...")
-    subprocess.check_call(["python", "-m", "pip", "install", "beautifulsoup4"])
-    from bs4 import BeautifulSoup
-    print("✅ bs4 installiert")
+    url = "https://www.finanzen.net/rohstoffe/erdgas-preis-natural-gas"
+    html = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).text
+    soup = BeautifulSoup(html, "html.parser")
 
-# ----------------------------------------------------------
-# ⚙️ Einstellungen
-# ----------------------------------------------------------
-HIST_FILE = "gas_history.csv"
-PREVIOUS_FILE = "previous_result.txt"
-SYMBOL_GAS = "Natural Gas"
+    # Suche gezielt nach Preis mit „USD“ in der Nähe von „Erdgas“ oder „Natural Gas“
+    candidates = []
+    for tag in soup.find_all(text=re.compile(r"([0-9]+,[0-9]+)\s*USD")):
+        if "MMBtu" in tag or "Natural Gas" in tag or "Erdgas" in tag:
+            val = re.search(r"([0-9]+,[0-9]+)", tag)
+            if val:
+                price = float(val.group(1).replace(",", "."))
+                if 1 < price < 50:  # realistische Erdgaspreise
+                    candidates.append(price)
 
-# Modellparameter
-SMA_SHORT = 15
-SMA_LONG = 40
-W_SMA = 8
-W_RSI = 1.0
-W_ATR = 5
-W_STREAK = 1.5
-ATR_PERIOD = 14
-RSI_PERIOD = 14
-CHAIN_MAX = 14
+    # Fallback: Suche in div/span mit 'price' im Klassennamen
+    if not candidates:
+        for el in soup.find_all(["span", "div"], class_=re.compile(r"price", re.I)):
+            m = re.search(r"([0-9]+,[0-9]+)", el.text)
+            if m:
+                price = float(m.group(1).replace(",", "."))
+                if 1 < price < 50:
+                    candidates.append(price)
 
-print("🔮 Starte Gasprognose...")
+    if candidates:
+        today_price = min(candidates)  # kleinstmöglicher plausibler Wert = Spotpreis
+        print(f"✅ Spotpreis erkannt: {today_price} USD/MMBtu (Quelle: finanzen.net)")
+    else:
+        raise ValueError("❌ Kein Spotpreis gefunden!")
+
+    today = pd.Timestamp(datetime.now().date())
+    if not ((df["Date"] == today).any()):
+        new_row = pd.DataFrame([{"Date": today, "Close": today_price, "High": today_price, "Low": today_price}])
+        df = pd.concat([df, new_row], ignore_index=True)
+
+except Exception as e:
+    print(f"⚠️ Fehler beim Abrufen des aktuellen Preises: {e}")
+    if not df.empty:
+        today_price = df["Close"].iloc[-1]
+        print(f"ℹ️ Verwende letzten bekannten Preis: {today_price} USD/MMBtu")
+    else:
+        raise SystemExit("❌ Kein Preis verfügbar und keine Historie vorhanden — Abbruch.")
+
 
 # ----------------------------------------------------------
 # 🔹 Historische Daten laden
@@ -169,3 +186,4 @@ if prev_prob is not None:
 with open(PREVIOUS_FILE, "w", encoding="utf-8") as f:
     f.write(msg)
 print("💾 previous_result.txt aktualisiert.")
+
