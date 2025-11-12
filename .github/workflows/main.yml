@@ -9,7 +9,6 @@ on:
 jobs:
   run-forecast:
     runs-on: ubuntu-latest
-    retention-days: 1   # 🔹 Nur 1 Tag aufbewahren
 
     steps:
       - name: Checkout repository
