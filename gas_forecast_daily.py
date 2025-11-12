@@ -35,10 +35,11 @@ W_SMA = 8
 W_RSI = 1.0
 W_ATR = 5
 W_STREAK = 1.5
-W_OIL = 8
 ATR_PERIOD = 14
 RSI_PERIOD = 14
 CHAIN_MAX = 14
+
+print("🔮 Starte Gasprognose...")
 
 # ----------------------------------------------------------
 # 🔹 Historische Daten laden
@@ -51,17 +52,35 @@ except FileNotFoundError:
     df = pd.DataFrame(columns=["Date", "Close", "High", "Low"])
 
 # ----------------------------------------------------------
-# 🔹 Aktuellen Spotpreis von finanzen.net holen
+# 🔹 Aktuellen Spotpreis von finanzen.net holen (robust)
 # ----------------------------------------------------------
+today_price = None
 try:
     url = "https://www.finanzen.net/rohstoffe/erdgas-preis-natural-gas"
     html = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).text
     soup = BeautifulSoup(html, "html.parser")
 
-    # Spotpreis gezielt extrahieren
-    price_span = soup.find("div", {"class": "instrument-price_last__KQzyA"})
-    if price_span:
-        today_price = float(price_span.text.replace(",", "."))
+    selectors = [
+        "div.instrument-price_last__KQzyA",
+        "span.price",
+        "div.price",
+        "span.instrument-price_last__KQzyA"
+    ]
+
+    for sel in selectors:
+        el = soup.select_one(sel)
+        if el and re.search(r"[0-9]+,[0-9]+", el.text):
+            today_price = float(re.search(r"[0-9]+,[0-9]+", el.text).group(0).replace(",", "."))
+            break
+
+    # Fallback: Zahlen mit "USD" suchen
+    if not today_price:
+        candidates = [float(x.replace(",", ".")) for x in re.findall(r"([0-9]+,[0-9]+)\s*USD", html)]
+        candidates = [c for c in candidates if 1 < c < 50]  # realistische Gaspreise
+        if candidates:
+            today_price = candidates[0]
+
+    if today_price:
         today = pd.Timestamp(datetime.now().date())
         if not ((df["Date"] == today).any()):
             new_row = pd.DataFrame([{"Date": today, "Close": today_price, "High": today_price, "Low": today_price}])
@@ -69,8 +88,15 @@ try:
         print(f"✅ Aktueller Spotpreis: {today_price} USD/MMBtu")
     else:
         raise ValueError("❌ Spotpreis konnte nicht gefunden werden.")
+
 except Exception as e:
-    raise ValueError(f"❌ Fehler beim Abrufen des aktuellen Preises: {e}")
+    print(f"⚠️ Fehler beim Abrufen des aktuellen Preises: {e}")
+    # Backup: letzten Kurs nehmen
+    if not df.empty:
+        today_price = df["Close"].iloc[-1]
+        print(f"ℹ️ Verwende letzten bekannten Preis: {today_price} USD/MMBtu")
+    else:
+        raise SystemExit("❌ Kein Preis verfügbar und keine Historie vorhanden — Abbruch.")
 
 # ----------------------------------------------------------
 # 🔹 Indikatoren berechnen
@@ -138,7 +164,7 @@ if prev_prob is not None:
     diff = abs(trend_prob - prev_prob) / prev_prob * 100 if prev_prob != 0 else 0
     print(f"🔸 Änderung: {diff:.2f}% (Trend vorher: {prev_trend} → jetzt: {trend})")
     if diff > 10 or prev_trend != ("Steigend" if trend_prob >= 50 else "Fallend"):
-        print("::warning::⚠️ Signifikante Änderung oder Trendwechsel erkannt!")
+        print("⚠️ Signifikante Änderung oder Trendwechsel erkannt!")
 
 with open(PREVIOUS_FILE, "w", encoding="utf-8") as f:
     f.write(msg)
