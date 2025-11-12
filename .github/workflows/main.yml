@@ -38,3 +38,8 @@ jobs:
           git add result.txt previous_result.txt || true
           git commit -m "📊 Stündliche Gas-Prognose aktualisiert" || echo "Keine Änderungen"
           git push
+          jobs:
+  run-forecast:
+    runs-on: ubuntu-latest
+    retention-days: 1   # 🔹 Nur 1 Tage aufbewahren
+
