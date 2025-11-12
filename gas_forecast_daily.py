@@ -36,6 +36,7 @@ W_STREAK = 1.5
 ATR_PERIOD = 14
 RSI_PERIOD = 14
 CHAIN_MAX = 14
+API_KEY = os.getenv("TRADINGECONOMICS_KEY", "DEIN_KEY_HIER")
 
 # ----------------------------------------------------------
 # 🔹 Historische Daten laden
@@ -48,51 +49,70 @@ except FileNotFoundError:
     df = pd.DataFrame(columns=["Date", "Close", "High", "Low"])
 
 # ----------------------------------------------------------
-# 🔹 Aktuellen Spotpreis holen (robust)
+# 🔹 Aktuellen Spotpreis holen (TradingEconomics → Fallback finanzen.net)
 # ----------------------------------------------------------
 today_price = None
 try:
-    url = "https://www.finanzen.net/rohstoffe/erdgas-preis-natural-gas"
-    html = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).text
-    soup = BeautifulSoup(html, "html.parser")
+    # 1️⃣ Versuch: TradingEconomics API
+    url = f"https://api.tradingeconomics.com/markets/commodities?c={API_KEY}"
+    data = requests.get(url, timeout=10).json()
 
-    candidates = []
-    # Suche gezielt nach Preis mit USD in Erdgas-Kontext
-    for tag in soup.find_all(text=re.compile(r"([0-9]+,[0-9]+)\s*USD")):
-        if "MMBtu" in tag or "Erdgas" in tag or "Natural Gas" in tag:
-            val = re.search(r"([0-9]+,[0-9]+)", tag)
-            if val:
-                price = float(val.group(1).replace(",", "."))
-                if 1 < price < 50:
-                    candidates.append(price)
+    for item in data:
+        if item.get("symbol") == "NATGAS" or "Natural Gas" in item.get("name", ""):
+            today_price = float(item.get("last", 0))
+            break
 
-    # Fallback: Suche in div/span mit "price"
-    if not candidates:
-        for el in soup.find_all(["span", "div"], class_=re.compile(r"price", re.I)):
-            m = re.search(r"([0-9]+,[0-9]+)", el.text)
-            if m:
-                price = float(m.group(1).replace(",", "."))
-                if 1 < price < 50:
-                    candidates.append(price)
-
-    if candidates:
-        today_price = min(candidates)
-        print(f"✅ Spotpreis erkannt: {today_price} USD/MMBtu (Quelle: finanzen.net)")
+    if today_price and 1 < today_price < 50:
+        print(f"✅ Spotpreis (TradingEconomics): {today_price} USD/MMBtu")
     else:
-        raise ValueError("❌ Kein Spotpreis gefunden!")
-
-    today = pd.Timestamp(datetime.now().date())
-    if not ((df["Date"] == today).any()):
-        new_row = pd.DataFrame([{"Date": today, "Close": today_price, "High": today_price, "Low": today_price}])
-        df = pd.concat([df, new_row], ignore_index=True)
+        raise ValueError("Kein gültiger Wert von TradingEconomics erhalten")
 
 except Exception as e:
-    print(f"⚠️ Fehler beim Abrufen des aktuellen Preises: {e}")
-    if not df.empty:
-        today_price = df["Close"].iloc[-1]
-        print(f"ℹ️ Verwende letzten bekannten Preis: {today_price} USD/MMBtu")
-    else:
-        raise SystemExit("❌ Kein Preis verfügbar und keine Historie vorhanden — Abbruch.")
+    print(f"⚠️ TradingEconomics-API nicht verfügbar ({e}) – wechsle zu finanzen.net ...")
+    try:
+        # 2️⃣ Fallback: finanzen.net Parsing
+        url = "https://www.finanzen.net/rohstoffe/erdgas-preis-natural-gas"
+        html = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).text
+        soup = BeautifulSoup(html, "html.parser")
+
+        candidates = []
+        for tag in soup.find_all(text=re.compile(r"([0-9]+,[0-9]+)\s*USD")):
+            if "MMBtu" in tag or "Erdgas" in tag or "Natural Gas" in tag:
+                val = re.search(r"([0-9]+,[0-9]+)", tag)
+                if val:
+                    price = float(val.group(1).replace(",", "."))
+                    if 1 < price < 50:
+                        candidates.append(price)
+
+        if not candidates:
+            for el in soup.find_all(["span", "div"], class_=re.compile(r"price", re.I)):
+                m = re.search(r"([0-9]+,[0-9]+)", el.text)
+                if m:
+                    price = float(m.group(1).replace(",", "."))
+                    if 1 < price < 50:
+                        candidates.append(price)
+
+        if candidates:
+            today_price = min(candidates)
+            print(f"✅ Spotpreis (Fallback finanzen.net): {today_price} USD/MMBtu")
+        else:
+            raise ValueError("❌ Kein Spotpreis auf finanzen.net gefunden!")
+
+    except Exception as e2:
+        print(f"⚠️ Fehler beim Abrufen des Preises: {e2}")
+        if not df.empty:
+            today_price = df["Close"].iloc[-1]
+            print(f"ℹ️ Verwende letzten bekannten Preis: {today_price} USD/MMBtu")
+        else:
+            raise SystemExit("❌ Kein Preis verfügbar und keine Historie vorhanden — Abbruch.")
+
+# ----------------------------------------------------------
+# 🔹 Neue Zeile speichern
+# ----------------------------------------------------------
+today = pd.Timestamp(datetime.now().date())
+if not ((df["Date"] == today).any()):
+    new_row = pd.DataFrame([{"Date": today, "Close": today_price, "High": today_price, "Low": today_price}])
+    df = pd.concat([df, new_row], ignore_index=True)
 
 # ----------------------------------------------------------
 # 🔹 Indikatoren berechnen
@@ -128,7 +148,7 @@ trend = "Steigend 📈" if trend_prob >= 50 else "Fallend 📉"
 last_close = df["Close"].iloc[-1]
 
 # ----------------------------------------------------------
-# 🔹 Ausgabe speichern
+# 🔹 Ergebnis speichern
 # ----------------------------------------------------------
 msg = (
     f"📅 {datetime.now():%d.%m.%Y %H:%M}\n"
