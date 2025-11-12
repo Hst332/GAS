@@ -1,13 +1,13 @@
 # ----------------------------------------------------------
-# 🔹 Daily Natural Gas Forecast mit Speicherung der Historie
+# 🔹 Daily Natural Gas Forecast mit Speicherung der Historie (angepasst)
 # ----------------------------------------------------------
 import requests
 import pandas as pd
 import numpy as np
 from datetime import datetime
 import ta
-import re
 import os
+from bs4 import BeautifulSoup
 
 # ----------------------------------------------------------
 # ⚙️ Einstellungen
@@ -15,7 +15,6 @@ import os
 HIST_FILE = "gas_history.csv"
 PREVIOUS_FILE = "previous_result.txt"
 SYMBOL_GAS = "Natural Gas"
-TRADINGECONOMICS_KEY = "DEIN_KEY_HIER"
 
 # Modellparameter
 SMA_SHORT = 15
@@ -40,21 +39,24 @@ except FileNotFoundError:
     df = pd.DataFrame(columns=["Date", "Close", "High", "Low"])
 
 # ----------------------------------------------------------
-# 🔹 Aktuellen Kurs von Finanzen.net holen
+# 🔹 Aktuellen Kurs von finanzen.net holen (Spotpreis)
 # ----------------------------------------------------------
 try:
     url = "https://www.finanzen.net/rohstoffe/erdgas-preis-natural-gas"
     html = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}).text
-    match = re.search(r'([0-9]+,[0-9]+)\s*USD', html)
-    if match:
-        today_price = float(match.group(1).replace(',', '.'))
+    soup = BeautifulSoup(html, "html.parser")
+
+    # Spotpreis gezielt extrahieren
+    price_span = soup.find("div", {"class": "instrument-price_last__KQzyA"})
+    if price_span:
+        today_price = float(price_span.text.replace(",", "."))
         today = pd.Timestamp(datetime.now().date())
         if not ((df["Date"] == today).any()):
             new_row = pd.DataFrame([{"Date": today, "Close": today_price, "High": today_price, "Low": today_price}])
             df = pd.concat([df, new_row], ignore_index=True)
-        print(f"✅ Aktueller Preis: {today_price} USD")
+        print(f"✅ Aktueller Spotpreis: {today_price} USD/MMBtu")
     else:
-        raise ValueError("❌ Kurs konnte nicht gefunden werden.")
+        raise ValueError("❌ Spotpreis konnte nicht gefunden werden.")
 except Exception as e:
     raise ValueError(f"❌ Fehler beim Abrufen des aktuellen Preises: {e}")
 
@@ -68,7 +70,6 @@ df["Return"] = df["Close"].pct_change().fillna(0)
 high, low, close = df["High"], df["Low"], df["Close"]
 tr = pd.concat([high - low, (high - close.shift(1)).abs(), (low - close.shift(1)).abs()], axis=1).max(axis=1)
 df["ATR"] = tr.rolling(ATR_PERIOD).mean().bfill()
-
 df["RSI"] = ta.momentum.RSIIndicator(df["Close"], window=RSI_PERIOD).rsi().bfill()
 df["sma_short"] = df["Close"].rolling(SMA_SHORT).mean()
 df["sma_long"] = df["Close"].rolling(SMA_LONG).mean()
@@ -119,20 +120,13 @@ def get_previous_info(path):
         prob = float(m_prob.group(1)) if m_prob else None
         tr = m_trend.group(1) if m_trend else None
         return prob, tr
-    return None, None
 
 prev_prob, prev_trend = get_previous_info(PREVIOUS_FILE)
-change_triggered = False
-
 if prev_prob is not None:
     diff = abs(trend_prob - prev_prob) / prev_prob * 100 if prev_prob != 0 else 0
     print(f"🔸 Änderung: {diff:.2f}% (Trend vorher: {prev_trend} → jetzt: {trend})")
-
     if diff > 10 or prev_trend != ("Steigend" if trend_prob >= 50 else "Fallend"):
         print("::warning::⚠️ Signifikante Änderung oder Trendwechsel erkannt!")
-        change_triggered = True
-else:
-    print("ℹ️ Kein Vergleichswert vorhanden (erster Lauf).")
 
 with open(PREVIOUS_FILE, "w", encoding="utf-8") as f:
     f.write(msg)
