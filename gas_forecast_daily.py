@@ -1,5 +1,5 @@
 # ----------------------------------------------------------
-# 🔹 Daily Natural Gas Forecast mit Speicherung der Historie (angepasst)
+# 🔹 Daily Natural Gas Forecast mit Speicherung der Historie
 # ----------------------------------------------------------
 import requests
 import pandas as pd
@@ -7,7 +7,19 @@ import numpy as np
 from datetime import datetime
 import ta
 import os
-from bs4 import BeautifulSoup
+import re
+import subprocess
+
+# ----------------------------------------------------------
+# 🔹 bs4 (BeautifulSoup) installieren, falls nicht vorhanden
+# ----------------------------------------------------------
+try:
+    from bs4 import BeautifulSoup
+except ImportError:
+    print("⚠️ bs4 nicht gefunden. Installiere...")
+    subprocess.check_call(["python", "-m", "pip", "install", "beautifulsoup4"])
+    from bs4 import BeautifulSoup
+    print("✅ bs4 installiert")
 
 # ----------------------------------------------------------
 # ⚙️ Einstellungen
@@ -39,7 +51,7 @@ except FileNotFoundError:
     df = pd.DataFrame(columns=["Date", "Close", "High", "Low"])
 
 # ----------------------------------------------------------
-# 🔹 Aktuellen Kurs von finanzen.net holen (Spotpreis)
+# 🔹 Aktuellen Spotpreis von finanzen.net holen
 # ----------------------------------------------------------
 try:
     url = "https://www.finanzen.net/rohstoffe/erdgas-preis-natural-gas"
