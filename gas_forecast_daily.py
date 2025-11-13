@@ -1,11 +1,92 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+
+import os
+import re
+import requests
+import pandas as pd
+import numpy as np
+from datetime import datetime
+from bs4 import BeautifulSoup
+import ta
+
 # ----------------------------------------------------------
-# 🔹 Multi-Source Preisabruf mit Primärquelle und Fallback
+# ⚙️ Einstellungen
+# ----------------------------------------------------------
+HIST_FILE = "gas_history.csv"
+PREVIOUS_FILE = "previous_result.txt"
+
+SMA_SHORT = 15
+SMA_LONG = 40
+W_SMA = 8
+W_RSI = 1.0
+W_ATR = 5
+W_STREAK = 1.5
+ATR_PERIOD = 14
+RSI_PERIOD = 14
+CHAIN_MAX = 14
+
+# ----------------------------------------------------------
+# 🔹 Historische Daten laden oder neu anlegen
+# ----------------------------------------------------------
+try:
+    df = pd.read_csv(HIST_FILE, parse_dates=["Date"])
+    print(f"✅ Historische Daten geladen: {len(df)} Tage")
+except FileNotFoundError:
+    print("⚠️ Keine historische Datei gefunden. Neue wird erstellt.")
+    df = pd.DataFrame(columns=["Date", "Close", "High", "Low"])
+
+# ----------------------------------------------------------
+# 🔹 Preisabruffunktionen
+# ----------------------------------------------------------
+def get_tradingeconomics_price():
+    try:
+        url = f"https://api.tradingeconomics.com/markets/commodities?c=DEIN_KEY_HIER"
+        data = requests.get(url, timeout=10).json()
+        for item in data:
+            if "Natural Gas" in item.get("name", "") or item.get("symbol") == "NATGAS":
+                price = float(item.get("last", 0))
+                if price > 0:
+                    return price
+    except:
+        return None
+    return None
+
+def get_eia_price():
+    try:
+        url = f"https://api.eia.gov/v2/natural-gas/pri/whd/data/?api_key=DEIN_EIA_KEY_HIER&frequency=daily&data[0]=value&facets[series][]=NG.RNGWHHD.D&sort[0][column]=period&sort[0][direction]=desc&offset=0&length=1"
+        data = requests.get(url, timeout=10).json()
+        price = float(data["response"]["data"][0]["value"])
+        return price
+    except:
+        return None
+
+def get_finanzen_price():
+    try:
+        url = "https://www.finanzen.net/rohstoffe/erdgas-preis-natural-gas"
+        html = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10).text
+        soup = BeautifulSoup(html, "html.parser")
+        candidates = []
+        for tag in soup.find_all(text=re.compile(r"([0-9]+,[0-9]+)\s*USD")):
+            if any(x in tag for x in ["Erdgas", "Natural Gas", "MMBtu"]):
+                val = re.search(r"([0-9]+,[0-9]+)", tag)
+                if val:
+                    price = float(val.group(1).replace(",", "."))
+                    if 1 < price < 50:
+                        candidates.append(price)
+        if candidates:
+            return min(candidates)
+    except:
+        return None
+    return None
+
+# ----------------------------------------------------------
+# 🔹 Primärquelle Yahoo Finance NG=F mit Fallback
 # ----------------------------------------------------------
 PRIMARY_SOURCE = "Yahoo Finance"
 FALLBACK_USED = False
 today_price = None
 
-# Primärquelle
 try:
     import yfinance as yf
     gas = yf.Ticker("NG=F")
@@ -18,7 +99,6 @@ except Exception as e:
     print(f"⚠️ {PRIMARY_SOURCE} nicht verfügbar: {e}")
     FALLBACK_USED = True
 
-# Fallback
 if today_price is None:
     for src in [get_tradingeconomics_price, get_eia_price, get_finanzen_price]:
         today_price = src()
@@ -31,12 +111,11 @@ if not today_price:
     raise SystemExit("❌ Kein gültiger Preis gefunden (alle Quellen fehlgeschlagen).")
 
 # ----------------------------------------------------------
-# 🔹 Historie aktualisieren
+# 🔹 Historie erweitern
 # ----------------------------------------------------------
 today = pd.Timestamp(datetime.now().date())
 if not ((df["Date"] == today).any()):
     df.loc[len(df)] = [today, today_price, today_price, today_price]
-    print(f"💾 Neuer Datensatz: {today_price} USD/MMBtu ({today.date()})")
 df.to_csv(HIST_FILE, index=False)
 
 # ----------------------------------------------------------
@@ -69,7 +148,7 @@ trend = "Steigend 📈" if trend_prob >= 50 else "Fallend 📉"
 last_close = df["Close"].iloc[-1]
 
 # ----------------------------------------------------------
-# 🔹 Vorheriges Ergebnis einlesen für Unterschied
+# 🔹 Vorheriges Ergebnis einlesen
 # ----------------------------------------------------------
 def get_previous_info(path):
     if not os.path.exists(path):
@@ -109,12 +188,10 @@ if diff_percent is not None:
 # ----------------------------------------------------------
 with open("result.txt", "w", encoding="utf-8") as f:
     f.write(msg)
-print("✅ Ergebnis in result.txt gespeichert.\n")
-print(msg)
-
 with open(PREVIOUS_FILE, "w", encoding="utf-8") as f:
     f.write(msg)
-print("💾 previous_result.txt aktualisiert.")
+
+print(msg)
 
 # ----------------------------------------------------------
 # 🔹 CSV-Log im Repo-Root
@@ -133,9 +210,7 @@ row = {
 
 if not os.path.exists(LOG_CSV):
     pd.DataFrame([row]).to_csv(LOG_CSV, index=False, encoding="utf-8")
-    print(f"📄 Neue Logdatei {LOG_CSV} erstellt.")
 else:
     df_log = pd.read_csv(LOG_CSV)
     df_log = pd.concat([df_log, pd.DataFrame([row])], ignore_index=True)
     df_log.to_csv(LOG_CSV, index=False, encoding="utf-8")
-    print(f"📊 Ergebnis in {LOG_CSV} angehängt.")
