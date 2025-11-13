@@ -162,11 +162,24 @@ def calculate_prediction(df):
     sign = np.sign(recent_returns[-1])
     streak = sum(1 for r in reversed(recent_returns[:-1]) if np.sign(r) == sign)
     prob += sign * streak * W_STREAK
-    return max(0, min(100, prob))
+    return prob  # kein Clipping – Werte können über 100 % liegen
 
 trend_prob = calculate_prediction(df)
 trend = "Steigend 📈" if trend_prob >= 50 else "Fallend 📉"
 last_close = df["Close"].iloc[-1]
+
+# ----------------------------------------------------------
+# 🔹 Unterschied zur vorherigen Berechnung (%)
+# ----------------------------------------------------------
+diff_percent = None
+if os.path.exists(PREVIOUS_FILE):
+    with open(PREVIOUS_FILE, "r", encoding="utf-8") as f:
+        prev_text = f.read()
+        m_prev = re.search(r"Wahrscheinlichkeit steigend:\s*([0-9.\-]+)", prev_text)
+        if m_prev:
+            prev_prob = float(m_prev.group(1))
+            if prev_prob != 0:
+                diff_percent = ((trend_prob - prev_prob) / abs(prev_prob)) * 100
 
 # ----------------------------------------------------------
 # 🔹 Ergebnis speichern
@@ -176,8 +189,11 @@ msg = (
     f"🔥 Erdgaspreis: {round(last_close,3)} USD/MMBtu\n"
     f"🔮 Trend: {trend}\n"
     f"📊 Wahrscheinlichkeit steigend: {round(trend_prob,2)} %\n"
-    f"📊 Wahrscheinlichkeit fallend : {round(100-trend_prob,2)} %\n"
+    f"📊 Wahrscheinlichkeit fallend : {round(100 - trend_prob,2)} %\n"
 )
+
+if diff_percent is not None:
+    msg += f"📈 Unterschied zur letzten Berechnung: {round(diff_percent,2)} %\n"
 
 with open("result.txt", "w", encoding="utf-8") as f:
     f.write(msg)
