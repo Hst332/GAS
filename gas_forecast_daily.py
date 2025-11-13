@@ -61,72 +61,34 @@ except FileNotFoundError:
     df.to_csv(HIST_FILE, index=False)
 
 # ----------------------------------------------------------
-# 🔹 Multi-Source Preisabruf
+# 🔹 Multi-Source Preisabruf mit Fallback und Quellinfo
 # ----------------------------------------------------------
-def get_tradingeconomics_price():
-    try:
-        url = f"https://api.tradingeconomics.com/markets/commodities?c={TRADINGECONOMICS_KEY}"
-        data = requests.get(url, timeout=10).json()
-        for item in data:
-            if "Natural Gas" in item.get("name", "") or item.get("symbol") == "NATGAS":
-                price = float(item.get("last", 0))
-                if price > 0:
-                    print(f"✅ Preis von TradingEconomics: {price} USD/MMBtu")
-                    return price
-    except Exception as e:
-        print(f"⚠️ TradingEconomics nicht verfügbar: {e}")
-    return None
-
-def get_eia_price():
-    try:
-        url = f"https://api.eia.gov/v2/natural-gas/pri/whd/data/?api_key={EIA_API_KEY}&frequency=daily&data[0]=value&facets[series][]=NG.RNGWHHD.D&sort[0][column]=period&sort[0][direction]=desc&offset=0&length=1"
-        data = requests.get(url, timeout=10).json()
-        price = float(data["response"]["data"][0]["value"])
-        if price > 0:
-            print(f"✅ Preis von EIA: {price} USD/MMBtu")
-            return price
-    except Exception as e:
-        print(f"⚠️ EIA API nicht verfügbar: {e}")
-    return None
-
-def get_yahoo_price():
-    try:
-        gas = yf.Ticker("NG=F")
-        price = gas.info.get("regularMarketPrice")
-        if price and price > 0:
-            print(f"✅ Preis von Yahoo Finance (Future): {price} USD/MMBtu")
-            return price
-    except Exception as e:
-        print(f"⚠️ Yahoo Finance nicht verfügbar: {e}")
-    return None
-
-def get_finanzen_price():
-    try:
-        url = "https://www.finanzen.net/rohstoffe/erdgas-preis-natural-gas"
-        html = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10).text
-        soup = BeautifulSoup(html, "html.parser")
-        candidates = []
-        for tag in soup.find_all(text=re.compile(r"([0-9]+,[0-9]+)\s*USD")):
-            if any(x in tag for x in ["Erdgas", "Natural Gas", "MMBtu"]):
-                val = re.search(r"([0-9]+,[0-9]+)", tag)
-                if val:
-                    price = float(val.group(1).replace(",", "."))
-                    if 1 < price < 50:
-                        candidates.append(price)
-        if candidates:
-            price = min(candidates)
-            print(f"✅ Preis von finanzen.net: {price} USD/MMBtu")
-            return price
-    except Exception as e:
-        print(f"⚠️ finanzen.net nicht verfügbar: {e}")
-    return None
-
-sources = [get_tradingeconomics_price, get_eia_price, get_yahoo_price, get_finanzen_price]
+PRIMARY_SOURCE = "Yahoo Finance"
+FALLBACK_USED = False
 today_price = None
-for src in sources:
-    today_price = src()
-    if today_price:
-        break
+
+# Primärquelle
+try:
+    import yfinance as yf
+    gas = yf.Ticker("NG=F")
+    price = gas.info.get("regularMarketPrice")
+    if price and price > 0:
+        today_price = float(price)
+        source_used = PRIMARY_SOURCE
+        print(f"✅ Preis von {PRIMARY_SOURCE}: {today_price} USD/MMBtu")
+except Exception as e:
+    print(f"⚠️ {PRIMARY_SOURCE} nicht verfügbar: {e}")
+    FALLBACK_USED = True
+
+# Fallback
+if today_price is None:
+    for src in [get_tradingeconomics_price, get_eia_price, get_finanzen_price]:
+        today_price = src()
+        if today_price:
+            source_used = "Fallback"
+            FALLBACK_USED = True
+            break
+
 if not today_price:
     raise SystemExit("❌ Kein gültiger Preis gefunden (alle Quellen fehlgeschlagen).")
 
@@ -290,6 +252,7 @@ else:
 with open(PREVIOUS_FILE, "w", encoding="utf-8") as f:
     f.write(msg)
 print("💾 previous_result.txt aktualisiert.")
+
 
 
 
