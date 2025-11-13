@@ -1,5 +1,6 @@
-📅 13.11.2025 06:30
-🔥 Erdgaspreis: 4.479 USD/MMBtu
-🔮 Trend: Steigend 📈
-📊 Wahrscheinlichkeit steigend: 100 %
-📊 Wahrscheinlichkeit fallend : 0 %
+📅 13.11.2025 06:47
+🔥 Erdgaspreis: 4.467 USD/MMBtu
+🔮 Trend: Fallend 📉
+📊 Wahrscheinlichkeit steigend: nan %
+📊 Wahrscheinlichkeit fallend : nan %
+📈 Unterschied zur letzten Berechnung: nan %
