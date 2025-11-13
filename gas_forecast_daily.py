@@ -11,6 +11,7 @@ import numpy as np
 from datetime import datetime
 from bs4 import BeautifulSoup
 import ta
+import yfinance as yf
 
 # ----------------------------------------------------------
 # ⚙️ Einstellungen
@@ -31,20 +32,38 @@ RSI_PERIOD = 14
 CHAIN_MAX = 14
 
 # ----------------------------------------------------------
+# 📜 Historische Henry-Hub-Daten abrufen (60 Tage)
+# ----------------------------------------------------------
+def get_initial_history(days=60):
+    try:
+        gas = yf.Ticker("NG=F")
+        hist = gas.history(period=f"{days}d")
+        if hist.empty:
+            raise ValueError("Keine historischen Daten von Yahoo Finance erhalten.")
+        df_hist = hist[["Close", "High", "Low"]].reset_index()
+        df_hist.rename(columns={"Date": "Date"}, inplace=True)
+        df_hist["Date"] = pd.to_datetime(df_hist["Date"]).dt.date
+        print(f"✅ {len(df_hist)} historische Gasdaten geladen (Yahoo Finance).")
+        return df_hist
+    except Exception as e:
+        print(f"⚠️ Historische Daten konnten nicht geladen werden: {e}")
+        return pd.DataFrame(columns=["Date", "Close", "High", "Low"])
+
+# ----------------------------------------------------------
 # 🔹 Historische Daten laden oder neu anlegen
 # ----------------------------------------------------------
 try:
     df = pd.read_csv(HIST_FILE, parse_dates=["Date"])
     print(f"✅ Historische Daten geladen: {len(df)} Tage")
 except FileNotFoundError:
-    print("⚠️ Keine historische Datei gefunden. Neue wird erstellt.")
-    df = pd.DataFrame(columns=["Date", "Close", "High", "Low"])
+    print("⚠️ Keine historische Datei gefunden. Lade initiale Daten …")
+    df = get_initial_history(60)
+    df.to_csv(HIST_FILE, index=False)
 
 # ----------------------------------------------------------
 # 🔹 Multi-Source Preisabruf
 # ----------------------------------------------------------
 def get_tradingeconomics_price():
-    """TradingEconomics API (Henry Hub Spotpreis)"""
     try:
         url = f"https://api.tradingeconomics.com/markets/commodities?c={TRADINGECONOMICS_KEY}"
         data = requests.get(url, timeout=10).json()
@@ -58,9 +77,7 @@ def get_tradingeconomics_price():
         print(f"⚠️ TradingEconomics nicht verfügbar: {e}")
     return None
 
-
 def get_eia_price():
-    """EIA API (Henry Hub Spotpreis USD/MMBtu, daily)"""
     try:
         url = f"https://api.eia.gov/v2/natural-gas/pri/whd/data/?api_key={EIA_API_KEY}&frequency=daily&data[0]=value&facets[series][]=NG.RNGWHHD.D&sort[0][column]=period&sort[0][direction]=desc&offset=0&length=1"
         data = requests.get(url, timeout=10).json()
@@ -72,11 +89,8 @@ def get_eia_price():
         print(f"⚠️ EIA API nicht verfügbar: {e}")
     return None
 
-
 def get_yahoo_price():
-    """Yahoo Finance (Natural Gas Futures NG=F, Fallback)"""
     try:
-        import yfinance as yf
         gas = yf.Ticker("NG=F")
         price = gas.info.get("regularMarketPrice")
         if price and price > 0:
@@ -86,15 +100,12 @@ def get_yahoo_price():
         print(f"⚠️ Yahoo Finance nicht verfügbar: {e}")
     return None
 
-
 def get_finanzen_price():
-    """Letzter Fallback: finanzen.net Scraping"""
     try:
         url = "https://www.finanzen.net/rohstoffe/erdgas-preis-natural-gas"
         html = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10).text
         soup = BeautifulSoup(html, "html.parser")
         candidates = []
-
         for tag in soup.find_all(text=re.compile(r"([0-9]+,[0-9]+)\s*USD")):
             if any(x in tag for x in ["Erdgas", "Natural Gas", "MMBtu"]):
                 val = re.search(r"([0-9]+,[0-9]+)", tag)
@@ -102,31 +113,20 @@ def get_finanzen_price():
                     price = float(val.group(1).replace(",", "."))
                     if 1 < price < 50:
                         candidates.append(price)
-
         if candidates:
             price = min(candidates)
             print(f"✅ Preis von finanzen.net: {price} USD/MMBtu")
             return price
-        else:
-            raise ValueError("Kein Preis gefunden.")
     except Exception as e:
         print(f"⚠️ finanzen.net nicht verfügbar: {e}")
     return None
 
-
-sources = [
-    get_tradingeconomics_price,
-    get_eia_price,
-    get_yahoo_price,
-    get_finanzen_price,
-]
-
+sources = [get_tradingeconomics_price, get_eia_price, get_yahoo_price, get_finanzen_price]
 today_price = None
 for src in sources:
     today_price = src()
     if today_price:
         break
-
 if not today_price:
     raise SystemExit("❌ Kein gültiger Preis gefunden (alle Quellen fehlgeschlagen).")
 
@@ -154,15 +154,23 @@ df["sma_long"] = df["Close"].rolling(SMA_LONG).mean()
 # 🔹 Prognosefunktion
 # ----------------------------------------------------------
 def calculate_prediction(df):
+    # Sicherheitsprüfungen
+    if df["Close"].count() < max(SMA_LONG, ATR_PERIOD, RSI_PERIOD):
+        print("⚠️ Zu wenige Daten für Berechnung – neutraler Wert verwendet.")
+        return 50.0
+    if df[["sma_short", "sma_long", "RSI", "ATR"]].iloc[-1].isnull().any():
+        print("⚠️ Unvollständige Indikatoren – neutraler Wert verwendet.")
+        return 50.0
+
     prob = 50
     prob += W_SMA if df["sma_short"].iloc[-1] > df["sma_long"].iloc[-1] else -W_SMA
     prob += (df["RSI"].iloc[-1] - 50) * W_RSI / 10
     prob += np.tanh(df["Return"].iloc[-1] / df["ATR"].iloc[-1]) * W_ATR
     recent_returns = df["Return"].tail(CHAIN_MAX).values
-    sign = np.sign(recent_returns[-1])
+    sign = np.sign(recent_returns[-1]) if len(recent_returns) > 0 else 0
     streak = sum(1 for r in reversed(recent_returns[:-1]) if np.sign(r) == sign)
     prob += sign * streak * W_STREAK
-    return prob  # kein Clipping – Werte können über 100 % liegen
+    return prob  # keine Begrenzung
 
 trend_prob = calculate_prediction(df)
 trend = "Steigend 📈" if trend_prob >= 50 else "Fallend 📉"
@@ -191,7 +199,6 @@ msg = (
     f"📊 Wahrscheinlichkeit steigend: {round(trend_prob,2)} %\n"
     f"📊 Wahrscheinlichkeit fallend : {round(100 - trend_prob,2)} %\n"
 )
-
 if diff_percent is not None:
     msg += f"📈 Unterschied zur letzten Berechnung: {round(diff_percent,2)} %\n"
 
@@ -208,8 +215,8 @@ def get_previous_info(path):
         return None, None
     with open(path, "r", encoding="utf-8") as f:
         text = f.read()
-        m_prob = re.search(r'Wahrscheinlichkeit steigend:\s*([0-9.]+)', text)
-        m_trend = re.search(r'Trend:\s*(Steigend|Fallend)', text)
+        m_prob = re.search(r"Wahrscheinlichkeit steigend:\s*([0-9.]+)", text)
+        m_trend = re.search(r"Trend:\s*(Steigend|Fallend)", text)
         prob = float(m_prob.group(1)) if m_prob else None
         tr = m_trend.group(1) if m_trend else None
         return prob, tr
