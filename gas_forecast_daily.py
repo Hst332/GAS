@@ -211,9 +211,31 @@ print("✅ Ergebnis in result.txt gespeichert.\n")
 print(msg)
 
 # ----------------------------------------------------------
-# 📊 Ergebnisse tabellarisch speichern (CSV)
+# 🔹 Ergebnis speichern
 # ----------------------------------------------------------
-LOG_CSV = "gas_forecast_log.csv"
+msg = (
+    f"📅 {datetime.now():%d.%m.%Y %H:%M}\n"
+    f"🔥 Erdgaspreis: {round(last_close,3)} USD/MMBtu\n"
+    f"🔮 Trend: {trend}\n"
+    f"📊 Wahrscheinlichkeit steigend: {round(trend_prob,2)} %\n"
+    f"📊 Wahrscheinlichkeit fallend : {round(100 - trend_prob,2)} %\n"
+)
+
+if diff_percent is not None:
+    sign = "+" if diff_percent >= 0 else "−"
+    msg += f"📈 Unterschied zur letzten Berechnung: {sign}{abs(round(diff_percent,2))} %\n"
+
+# 📝 Aktuelles Ergebnis speichern
+with open("result.txt", "w", encoding="utf-8") as f:
+    f.write(msg)
+print("✅ Ergebnis in result.txt gespeichert.\n")
+print(msg)
+
+# ----------------------------------------------------------
+# 📊 Ergebnisse tabellarisch speichern (CSV) im Repo-Root
+# ----------------------------------------------------------
+import os
+LOG_CSV = os.path.join(os.path.dirname(os.path.abspath(__file__)), "gas_forecast_log.csv")
 
 # Werte für Tabelle vorbereiten
 date_str = datetime.now().strftime("%d.%m.%Y")
@@ -269,30 +291,6 @@ with open(PREVIOUS_FILE, "w", encoding="utf-8") as f:
     f.write(msg)
 print("💾 previous_result.txt aktualisiert.")
 
-# ----------------------------------------------------------
-# 🔹 Trendänderungserkennung
-# ----------------------------------------------------------
-def get_previous_info(path):
-    if not os.path.exists(path):
-        return None, None
-    with open(path, "r", encoding="utf-8") as f:
-        text = f.read()
-        m_prob = re.search(r"Wahrscheinlichkeit steigend:\s*([0-9.]+)", text)
-        m_trend = re.search(r"Trend:\s*(Steigend|Fallend)", text)
-        prob = float(m_prob.group(1)) if m_prob else None
-        tr = m_trend.group(1) if m_trend else None
-        return prob, tr
 
-prev_prob, prev_trend = get_previous_info(PREVIOUS_FILE)
-if prev_prob is not None:
-    diff = abs(trend_prob - prev_prob) / prev_prob * 100 if prev_prob != 0 else 0
-    if diff > 10 or prev_trend != ("Steigend" if trend_prob >= 50 else "Fallend"):
-        print("⚠️ Signifikante Änderung oder Trendwechsel erkannt!")
-else:
-    print("ℹ️ Kein Vergleichswert vorhanden (erster Lauf).")
-
-with open(PREVIOUS_FILE, "w", encoding="utf-8") as f:
-    f.write(msg)
-print("💾 previous_result.txt aktualisiert.")
 
 
