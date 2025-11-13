@@ -200,7 +200,8 @@ msg = (
     f"📊 Wahrscheinlichkeit fallend : {round(100 - trend_prob,2)} %\n"
 )
 if diff_percent is not None:
-    msg += f"📈 Unterschied zur letzten Berechnung: {round(diff_percent,2)} %\n"
+    sign = "+" if diff_percent >= 0 else "−"
+    msg += f"📈 Unterschied zur letzten Berechnung: {sign}{abs(round(diff_percent,2))} %\n"
 
 with open("result.txt", "w", encoding="utf-8") as f:
     f.write(msg)
@@ -232,3 +233,4 @@ else:
 with open(PREVIOUS_FILE, "w", encoding="utf-8") as f:
     f.write(msg)
 print("💾 previous_result.txt aktualisiert.")
+
