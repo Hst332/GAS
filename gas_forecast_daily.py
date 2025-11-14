@@ -184,14 +184,26 @@ if diff_percent is not None:
     msg += f"📈 Unterschied zur letzten Berechnung: {sign}{abs(round(diff_percent,2))} %{source_warning}\n"
 
 # ----------------------------------------------------------
-# 🔹 Textdateien speichern
+# 🔹 Textdateien speichern (korrigierte Version)
 # ----------------------------------------------------------
+
+# 1. result.txt wird IMMER überschrieben
 with open("result.txt", "w", encoding="utf-8") as f:
     f.write(msg)
-with open(PREVIOUS_FILE, "w", encoding="utf-8") as f:
-    f.write(msg)
 
-print(msg)
+# 2. previous_result.txt wird NUR überschrieben, wenn sich die Wahrscheinlichkeit geändert hat
+update_previous = False
+
+if prev_prob is None:
+    update_previous = True
+else:
+    # Nur speichern, wenn Unterschied vorhanden ist
+    if round(prev_prob, 2) != round(trend_prob, 2):
+        update_previous = True
+
+if update_previous:
+    with open(PREVIOUS_FILE, "w", encoding="utf-8") as f:
+        f.write(msg)
 
 # ----------------------------------------------------------
 # 🔹 CSV-Log im Repo-Root
@@ -214,3 +226,4 @@ else:
     df_log = pd.read_csv(LOG_CSV)
     df_log = pd.concat([df_log, pd.DataFrame([row])], ignore_index=True)
     df_log.to_csv(LOG_CSV, index=False, encoding="utf-8")
+
